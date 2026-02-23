@@ -36,9 +36,6 @@ def load_trafo(sheet_name):
     df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
     df["power_W"] = pd.to_numeric(df["power_W"], errors="coerce")
 
-    # 🔹 SHIFT BACK 10 MINUTES (end-of-interval correction)
-    df["timestamp"] = df["timestamp"] - pd.Timedelta(minutes=10)
-
     df = df.dropna()
 
     # Convert W → kW
