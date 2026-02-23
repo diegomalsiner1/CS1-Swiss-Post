@@ -24,7 +24,10 @@ def load_trafo(sheet_name):
     )
 
     # Detect avg column automatically
-    avg_column = [col for col in df.columns if "-avg[W]" in col][0]
+    avg_columns = [col for col in df.columns if "-avg[W]" in col]
+    if not avg_columns:
+        raise ValueError(f"No avg column found in sheet {sheet_name}")
+    avg_column = avg_columns[0]
 
     df = df[["Zeit", avg_column]]
     df.columns = ["timestamp", "power_W"]
@@ -63,7 +66,6 @@ def load_trafo(sheet_name):
 
     return df
 
-
 # ==========================================================
 # Grid exchange (Trafo1 + Trafo2)
 # ==========================================================
@@ -94,17 +96,20 @@ def load_grid_exchange():
 
     return df[["timestamp", "trafo1_kW", "trafo2_kW", "grid_exchange_kW"]]
 
-
 # ==========================================================
 # 10 → 15 minute conversion
 # ==========================================================
 def convert_to_15min(df, column_name):
     """
-    Convert 10-min power column to 15-min resolution.
-    column_name must be:
-        'grid_exchange_kW'
-        'trafo1_kW'
-        'trafo2_kW'
+    Convert a 10-minute average power time series (kW)
+    into a 15-minute average power time series (kW).
+
+        1) Convert power → energy (kWh)
+        2) Move energy to a 5-minute grid
+        3) Aggregate energy to 15-minute blocks
+        4) Convert energy back → power
+
+    This guarantees energy conservation.
     """
 
     df = df.copy()
@@ -126,11 +131,9 @@ def convert_to_15min(df, column_name):
 
     return result
 
-
 # ==========================================================
 # Check
 # ==========================================================
-
 '''
 if __name__ == "__main__":
 
