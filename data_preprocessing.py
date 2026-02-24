@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import csv
 
 ## Will be used to process the input data before feeding the data into the optimization framework
 
@@ -133,6 +134,50 @@ def convert_to_15min(df, column_name):
 # ==========================================================
 
 ##TEST##
+
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+
+if __name__ == "__main__":
+
+    df = load_grid_exchange()
+    grid = convert_to_15min(df,"trafo1_kW")
+
+
+    start_date = "2024-02-10"
+    end_date   = "2024-02-11"
+
+    data = grid[
+        (grid["timestamp"] >= start_date) &
+        (grid["timestamp"] < end_date)
+    ].copy()
+
+    plt.figure()
+
+    plt.plot(data["timestamp"], data["trafo1_kW"])
+ #   plt.plot(data["timestamp"], data["trafo2_kW"])
+ #   plt.plot(data["timestamp"], data["grid_exchange_kW"])
+
+    # Dynamic axis formatting
+    if (pd.to_datetime(end_date) - pd.to_datetime(start_date)).days <= 1:
+        # Single day
+        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+        plt.gca().xaxis.set_major_locator(mdates.HourLocator(interval=1))
+    else:
+        # Multi-day
+        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%d-%m'))
+        plt.gca().xaxis.set_major_locator(mdates.DayLocator(interval=1))
+
+    plt.xticks(rotation=45)
+
+    plt.xlabel("Time")
+    plt.ylabel("Power (kW)")
+#    plt.title(f"Trafo1, Trafo2 & Grid Exchange\n{start_date} to {end_date}")
+#    plt.legend(["Trafo1", "Trafo2", "Grid Exchange"])
+
+    plt.tight_layout()
+    plt.show()
+##TEST##
 '''
 if __name__ == "__main__":
 
@@ -168,43 +213,43 @@ if __name__ == "__main__":
 # ==========================================================
 # Visualizing the data
 # ==========================================================
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
+#import matplotlib.pyplot as plt
+#import matplotlib.dates as mdates
 
-if __name__ == "__main__":
+#if __name__ == "__main__":
 
-    grid = load_grid_exchange()
+#    grid = load_grid_exchange()
 
-    start_date = "2024-02-10"
-    end_date   = "2024-02-11"
+#    start_date = "2024-02-10"
+#    end_date   = "2024-02-11"
 
-    data = grid[
-        (grid["timestamp"] >= start_date) &
-        (grid["timestamp"] < end_date)
-    ].copy()
+#    data = grid[
+#        (grid["timestamp"] >= start_date) &
+#        (grid["timestamp"] < end_date)
+#    ].copy()
 
-    plt.figure()
+#    plt.figure()
 
-    plt.plot(data["timestamp"], data["trafo1_kW"])
-    plt.plot(data["timestamp"], data["trafo2_kW"])
-    plt.plot(data["timestamp"], data["grid_exchange_kW"])
+#    plt.plot(data["timestamp"], data["trafo1_kW"])
+#    plt.plot(data["timestamp"], data["trafo2_kW"])
+#    plt.plot(data["timestamp"], data["grid_exchange_kW"])
 
     # Dynamic axis formatting
-    if (pd.to_datetime(end_date) - pd.to_datetime(start_date)).days <= 1:
+#    if (pd.to_datetime(end_date) - pd.to_datetime(start_date)).days <= 1:
         # Single day
-        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-        plt.gca().xaxis.set_major_locator(mdates.HourLocator(interval=1))
-    else:
+#        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+#        plt.gca().xaxis.set_major_locator(mdates.HourLocator(interval=1))
+#    else:
         # Multi-day
-        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%d-%m'))
-        plt.gca().xaxis.set_major_locator(mdates.DayLocator(interval=1))
+#        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%d-%m'))
+#        plt.gca().xaxis.set_major_locator(mdates.DayLocator(interval=1))
 
-    plt.xticks(rotation=45)
+#    plt.xticks(rotation=45)
 
-    plt.xlabel("Time")
-    plt.ylabel("Power (kW)")
-    plt.title(f"Trafo1, Trafo2 & Grid Exchange\n{start_date} to {end_date}")
-    plt.legend(["Trafo1", "Trafo2", "Grid Exchange"])
+#    plt.xlabel("Time")
+#    plt.ylabel("Power (kW)")
+#    plt.title(f"Trafo1, Trafo2 & Grid Exchange\n{start_date} to {end_date}")
+#    plt.legend(["Trafo1", "Trafo2", "Grid Exchange"])
 
-    plt.tight_layout()
-    plt.show()
+#    plt.tight_layout()
+#    plt.show()
