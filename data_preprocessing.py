@@ -1,5 +1,7 @@
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 
 ## Will be used to process the input data before feeding the data into the optimization framework
 
@@ -166,8 +168,6 @@ if __name__ == "__main__":
 # ==========================================================
 # Visualizing the data
 # ==========================================================
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 
 if __name__ == "__main__":
 
@@ -206,3 +206,218 @@ if __name__ == "__main__":
 
     plt.tight_layout()
     plt.show()
+
+# ==========================================================
+# EV demand LKW
+# ==========================================================
+def generate_lkw_profile(file_path, year=2025):
+    """
+    Generate full-year 2025 as in the raw data, 15-minute LKW charging profile.
+
+    Assumptions:
+        - Sheet contains one typical 15-min weekday
+        - Charging only Monday–Friday
+        - Saturday and Sunday = 0
+        - no seasonality
+    """
+
+    df = pd.read_excel(
+        file_path,
+        sheet_name="Zubau_LKW_Aug2025",
+        header=1
+    )
+
+    # Find exact Total kW column
+    power_col = None
+    for col in df.columns:
+        if str(col).strip() == "Total kW":
+            power_col = col
+            break
+
+    if power_col is None:
+        raise ValueError("Exact column 'Total kW' not found.")
+
+    time_col = df.columns[0]
+    df = df[[time_col, power_col]]
+    df.columns = ["time", "lkw_kW"]
+
+    df["time"] = pd.to_datetime(df["time"], format="%H:%M:%S", errors="coerce")
+    df["lkw_kW"] = pd.to_numeric(df["lkw_kW"], errors="coerce")
+
+    df = df.dropna().sort_values("time")
+
+    if len(df) != 96:
+        raise ValueError("LKW profile must contain 96 rows (15-min full weekday).")
+
+    daily_profile = df["lkw_kW"].values
+
+    # Create full-year 15-min index
+    start = pd.Timestamp(f"{year}-01-01 00:00:00")
+    end = pd.Timestamp(f"{year}-12-31 23:45:00")
+    full_index = pd.date_range(start=start, end=end, freq="15min")
+
+    result = pd.DataFrame({"timestamp": full_index})
+    result["weekday"] = result["timestamp"].dt.weekday  # Monday=0, Sunday=6
+
+    # Initialize with 0
+    result["lkw_kW"] = 0.0
+
+    # Apply profile only on weekdays
+    weekday_mask = result["weekday"] < 5
+
+    # Repeat daily profile for number of weekdays
+    weekday_indices = result[weekday_mask].index
+    num_weekdays = len(weekday_indices) // 96
+
+    repeated_profile = np.tile(daily_profile, num_weekdays)
+
+    result.loc[weekday_mask, "lkw_kW"] = repeated_profile
+
+    result = result.drop(columns="weekday")
+
+    return result
+
+# ==========================================================
+# EV demand Zustellung
+# ==========================================================
+def generate_zustellung_profile(file_path, year=2026):
+    """
+    Generate full-year 15-min Zustellung load profile.
+
+    - Winter profile from Excel
+    - Mixed resolution (hourly + 15-min) harmonized to 15-min
+    - Weekday-dependent (Mon–Sat)
+    - Sunday = 0
+    - Summer months reduced by 40%
+    """
+
+    df = pd.read_excel(
+        file_path,
+        sheet_name="Zubau_Zustellung_Oct2026",
+        header=0
+    )
+
+    # Remove empty Excel columns
+    df = df.loc[:, ~df.columns.str.contains("^Unnamed")]
+
+    # Rename first column to "time"
+    df = df.rename(columns={df.columns[0]: "time"})
+
+    # Robust time parsing
+    def parse_time(value):
+        try:
+            if isinstance(value, pd.Timestamp):
+                return value.time()
+            return pd.to_datetime(value, format="%H:%M:%S").time()
+        except:
+            return None
+
+    df["time"] = df["time"].apply(parse_time)
+    df = df.dropna(subset=["time"])
+
+    # Convert weekday columns to numeric
+    weekday_cols = df.columns.drop("time")
+    for col in weekday_cols:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    df = df.sort_values("time").reset_index(drop=True)
+
+    # harmonize to 15 minute resolution
+    df["timestamp"] = (
+        pd.to_datetime("1900-01-01")
+        + pd.to_timedelta(df["time"].astype(str))
+    )
+
+    df = df.set_index("timestamp")
+    df = df.drop(columns=["time"])
+
+    full_index = pd.date_range(
+        start="1900-01-01 00:00:00",
+        end="1900-01-01 23:45:00",
+        freq="15min"
+    )
+
+    df_15 = df.reindex(full_index).ffill()
+
+    df_15 = df_15.reset_index().rename(columns={"index": "timestamp"})
+    df_15["time"] = df_15["timestamp"].dt.time
+    df_15 = df_15.drop(columns=["timestamp"])
+
+    # full year timestamp
+    start = pd.Timestamp(f"{year}-01-01 00:00:00")
+    end = pd.Timestamp(f"{year}-12-31 23:45:00")
+
+    full_year_index = pd.date_range(start=start, end=end, freq="15min")
+
+    result = pd.DataFrame({"timestamp": full_year_index})
+    result["weekday_num"] = result["timestamp"].dt.weekday
+    result["time"] = result["timestamp"].dt.time
+
+    # mapping weekday profiles
+    lookup = {}
+    for day in df_15.columns:
+        if day != "time":
+            lookup[day] = dict(zip(df_15["time"], df_15[day]))
+
+    weekday_map = {
+        0: "Montag",
+        1: "Dienstag",
+        2: "Mittwoch",
+        3: "Donnerstag",
+        4: "Freitag",
+        5: "Samstag"
+    }
+
+    result["zustellung_kW"] = 0.0
+
+    for wd_num, wd_name in weekday_map.items():
+        mask = result["weekday_num"] == wd_num
+        result.loc[mask, "zustellung_kW"] = (
+            result.loc[mask, "time"].map(lookup[wd_name])
+        )
+
+    # Sunday remains 0 automatically
+
+    # apply summer reduction of -40%
+    summer_months = [4, 5, 6, 7, 8, 9]  # April–September
+
+    summer_mask = result["timestamp"].dt.month.isin(summer_months)
+    result.loc[summer_mask, "zustellung_kW"] *= 0.6
+
+    result = result[["timestamp", "zustellung_kW"]]
+
+    return result
+
+# ==========================================================
+# PLOT: LKW vs Zustellung vs Combined EV
+# ==========================================================
+# Generate profiles
+lkw = generate_lkw_profile(file_path, 2026)
+zustellung = generate_zustellung_profile(file_path, 2026)
+
+# Merge
+ev_total = lkw.merge(zustellung, on="timestamp")
+ev_total["ev_total_kW"] = (
+    ev_total["lkw_kW"] +
+    ev_total["zustellung_kW"]
+)
+
+# Select a timespan of interest
+week = ev_total[
+    (ev_total["timestamp"] >= "2026-01-05") &
+    (ev_total["timestamp"] < "2026-01-10")
+]
+
+# Single overlay plot
+plt.figure()
+plt.plot(week["timestamp"], week["lkw_kW"])
+plt.plot(week["timestamp"], week["zustellung_kW"])
+plt.plot(week["timestamp"], week["ev_total_kW"])
+
+plt.title("EV Charging Load")
+plt.xlabel("Timestamp")
+plt.ylabel("Power (kW)")
+plt.legend(["LKW", "Zustellung", "Combined EV"])
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.show()
