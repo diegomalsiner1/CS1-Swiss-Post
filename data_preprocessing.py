@@ -2,10 +2,50 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+import csv
+import tkinter as tk
+from tkinter import filedialog
 
 ## Will be used to process the input data before feeding the data into the optimization framework
 
-file_path = "01-INPUT-DATA/Vétroz/20251023_Standortdaten_Vétroz.xlsx"
+#file_path = "01-INPUT-DATA/Vétroz/20251023_Standortdaten_Vétroz.xlsx"
+file_path = filedialog.askopenfilename(initialdir = "01-INPUT-DATA",
+                                          title = "Select Input Data",
+                                          filetypes = [("Excel files", ".xlsx .xls")])
+# ==========================================================
+# Select sheets from excel file
+# ==========================================================
+def select_sheets():
+
+    def selection_list():
+        for var in vars:
+            if var.get() == 1:
+                selection.append(sheet_list[vars.index(var)])
+
+    df = pd.read_excel(file_path,sheet_name = None)
+    sheet_list = list(df.keys())
+    selection = []
+    root = tk.Tk()
+    root.title("Select Trafo Data Sheet(s)")
+    root.geometry = ('100x100')
+
+    vars = [tk.IntVar() for sheet in sheet_list]
+    btns = [tk.Checkbutton(root, text = sheet, variable = vars[sheet_list.index(sheet)],
+                        onvalue=1, offvalue=0) for sheet in sheet_list]
+
+    for btn in btns:
+        btn.pack(side = 'top')
+
+    sbtn = tk.Button(root, text = 'Apply', 
+                        command = selection_list) 
+    sbtn.pack(side = 'top')      
+
+    xbtn = tk.Button(root, text = 'Exit', 
+                        command = root.destroy) 
+    xbtn.pack(side = 'top')      
+    root.mainloop()
+
+    return(selection)
 
 # ==========================================================
 # Generic trafo loader
@@ -133,6 +173,14 @@ def convert_to_15min(df, column_name):
 # ==========================================================
 # Check
 # ==========================================================
+
+##TEST##
+
+selection = select_sheets()
+
+print(selection)
+
+##TEST##
 '''
 if __name__ == "__main__":
 
