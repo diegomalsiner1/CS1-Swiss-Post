@@ -53,6 +53,43 @@ def select_sheets(label_text):
 
     return(selection)
 
+
+# ==========================================================
+# 10 → 15 minute conversion
+# ==========================================================
+def convert_to_15min(df, column_name="power_kW"):
+    """
+    Convert a 10-minute average power time series (kW)
+    into a 15-minute average power time series (kW).
+
+        1) Convert power → energy (kWh)
+        2) Move energy to a 5-minute grid
+        3) Aggregate energy to 15-minute blocks
+        4) Convert energy back → power
+
+    This guarantees energy conservation.
+    """
+
+    df = df.copy()
+    df = df.set_index("timestamp")
+
+    df["energy_kWh"] = df[column_name] * (10 / 60)
+
+    # Upsample to 5-minute grid
+    df_5 = df["energy_kWh"].resample("5min").asfreq()
+    df_5 = df_5.ffill() / 2
+
+    # Aggregate to 15-minute
+    energy_15 = df_5.resample("15min").sum()
+
+    power_15 = energy_15 / (15 / 60)
+
+    result = power_15.reset_index()
+    result.columns = ["timestamp", column_name]
+
+    return result
+
+
 # ==========================================================
 # 10 → 15 minute conversion
 # ==========================================================
@@ -150,14 +187,80 @@ def load_trafo(sheet_name):
 # ==========================================================
 # Grid exchange (Trafo1 + Trafo2)
 # ==========================================================
+def load_grid_exchange(trafo_sheets):
+    """
+    Returns structured dataframe with:
+        timestamp
+        trafo1_kW
+        trafo2_kW
+        grid_exchange_kW
+    """
 
-sheets = select_sheets(file_path)
+    df = None
+    trafo_cols = []
 
-print(sheets)
+    for i, sheet in enumerate(trafo_sheets, start=1):
+        trafo = load_trafo(sheet)
 
-df_list = [load_trafo(sheet) for sheet in sheets]
+        col_name = f"trafo{i}_kW"
+        trafo = trafo.rename(columns={"power_kW": col_name})
 
-print(df_list)
+        trafo_cols.append(col_name)
+
+        if df is None:
+            df = trafo
+        else:
+            df = df.merge(trafo, on="timestamp")
+
+    # total grid exchange
+    df["grid_exchange_kW"] = df[trafo_cols].sum(axis=1)
+
+    return df[["timestamp", *trafo_cols, "grid_exchange_kW"]]
+
+
+
+
+# ==========================================================
+# Visualizing the data
+# ==========================================================
+if __name__ == "__main__":
+
+    grid = load_grid_exchange(trafo_list)
+
+    start_date = "2024-02-10"
+    end_date   = "2024-02-11"
+
+    data = grid[
+        (grid["timestamp"] >= start_date) &
+        (grid["timestamp"] < end_date)
+    ].copy()
+
+    plt.figure()
+
+    plt.plot(data["timestamp"], data["trafo1_kW"])
+    plt.plot(data["timestamp"], data["trafo2_kW"])
+    plt.plot(data["timestamp"], data["grid_exchange_kW"])
+
+    # Dynamic axis formatting
+    if (pd.to_datetime(end_date) - pd.to_datetime(start_date)).days <= 1:
+        # Single day
+        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+        plt.gca().xaxis.set_major_locator(mdates.HourLocator(interval=1))
+    else:
+        # Multi-day
+        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%d-%m'))
+        plt.gca().xaxis.set_major_locator(mdates.DayLocator(interval=1))
+
+    plt.xticks(rotation=45)
+
+    plt.xlabel("Time")
+    plt.ylabel("Power (kW)")
+    plt.title(f"Trafo1, Trafo2 & Grid Exchange\n{start_date} to {end_date}")
+    plt.legend(["Trafo1", "Trafo2", "Grid Exchange"])
+
+    plt.tight_layout()
+    plt.show()
+
 
 # ==========================================================
 # EV demand LKW
