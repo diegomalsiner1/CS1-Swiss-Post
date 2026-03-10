@@ -2,25 +2,30 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-import csv
 import tkinter as tk
 from tkinter import filedialog
 
 ## Will be used to process the input data before feeding the data into the optimization framework
 
-#file_path = "01-INPUT-DATA/Vétroz/20251023_Standortdaten_Vétroz.xlsx"
 file_path = filedialog.askopenfilename(initialdir = "01-INPUT-DATA",
                                           title = "Select Input Data",
                                           filetypes = [("Excel files", ".xlsx .xls")])
 # ==========================================================
 # Select sheets from excel file
 # ==========================================================
-def select_sheets():
+def select_sheets(label_text):
+    """
+    Opens a file dialog with the excel sheets in the selected excel file
+    """
 
     def selection_list():
+        selection.clear()
         for var in vars:
             if var.get() == 1:
                 selection.append(sheet_list[vars.index(var)])
+        root.destroy()
+
+        
 
     df = pd.read_excel(file_path,sheet_name = None)
     sheet_list = list(df.keys())
@@ -28,6 +33,10 @@ def select_sheets():
     root = tk.Tk()
     root.title("Select Trafo Data Sheet(s)")
     root.geometry = ('100x100')
+
+    # Add a label at the top
+    label = tk.Label(root, text=label_text, font=("Arial", 12, "bold"))
+    label.pack(side='top', pady=5)
 
     vars = [tk.IntVar() for sheet in sheet_list]
     btns = [tk.Checkbutton(root, text = sheet, variable = vars[sheet_list.index(sheet)],
@@ -46,6 +55,43 @@ def select_sheets():
     root.mainloop()
 
     return(selection)
+
+
+# ==========================================================
+# 10 → 15 minute conversion
+# ==========================================================
+def convert_to_15min(df, column_name="power_kW"):
+    """
+    Convert a 10-minute average power time series (kW)
+    into a 15-minute average power time series (kW).
+
+        1) Convert power → energy (kWh)
+        2) Move energy to a 5-minute grid
+        3) Aggregate energy to 15-minute blocks
+        4) Convert energy back → power
+
+    This guarantees energy conservation.
+    """
+
+    df = df.copy()
+    df = df.set_index("timestamp")
+
+    df["energy_kWh"] = df[column_name] * (10 / 60)
+
+    # Upsample to 5-minute grid
+    df_5 = df["energy_kWh"].resample("5min").asfreq()
+    df_5 = df_5.ffill() / 2
+
+    # Aggregate to 15-minute
+    energy_15 = df_5.resample("15min").sum()
+
+    power_15 = energy_15 / (15 / 60)
+
+    result = power_15.reset_index()
+    result.columns = ["timestamp", column_name]
+
+    return result
+
 
 # ==========================================================
 # Generic trafo loader
@@ -102,13 +148,15 @@ def load_trafo(sheet_name):
 
     df = df.reset_index()
     df.columns = ["timestamp", "power_kW"]
+    df = convert_to_15min(df, "power_kW")
 
     return df
+
 
 # ==========================================================
 # Grid exchange (Trafo1 + Trafo2)
 # ==========================================================
-def load_grid_exchange():
+def load_grid_exchange(sheet_trafo1="2024_Verbrauch_Trafo1", sheet_trafo2="2024_Verbrauch_Trafo2"):
     """
     Returns structured dataframe with:
         timestamp
@@ -117,8 +165,8 @@ def load_grid_exchange():
         grid_exchange_kW
     """
 
-    trafo1 = load_trafo("2024_Verbrauch_Trafo1")
-    trafo2 = load_trafo("2024_Verbrauch_Trafo2")
+    trafo1 = load_trafo(sheet_trafo1)
+    trafo2 = load_trafo(sheet_trafo2)
 
     df = trafo1.merge(
         trafo2,
@@ -135,50 +183,6 @@ def load_grid_exchange():
 
     return df[["timestamp", "trafo1_kW", "trafo2_kW", "grid_exchange_kW"]]
 
-# ==========================================================
-# 10 → 15 minute conversion
-# ==========================================================
-def convert_to_15min(df, column_name):
-    """
-    Convert a 10-minute average power time series (kW)
-    into a 15-minute average power time series (kW).
-
-        1) Convert power → energy (kWh)
-        2) Move energy to a 5-minute grid
-        3) Aggregate energy to 15-minute blocks
-        4) Convert energy back → power
-
-    This guarantees energy conservation.
-    """
-
-    df = df.copy()
-    df = df.set_index("timestamp")
-
-    df["energy_kWh"] = df[column_name] * (10 / 60)
-
-    # Upsample to 5-minute grid
-    df_5 = df["energy_kWh"].resample("5min").asfreq()
-    df_5 = df_5.ffill() / 2
-
-    # Aggregate to 15-minute
-    energy_15 = df_5.resample("15min").sum()
-
-    power_15 = energy_15 / (15 / 60)
-
-    result = power_15.reset_index()
-    result.columns = ["timestamp", column_name]
-
-    return result
-
-# ==========================================================
-# Check
-# ==========================================================
-
-##TEST##
-
-selection = select_sheets()
-
-print(selection)
 
 ##TEST##
 '''
@@ -216,7 +220,6 @@ if __name__ == "__main__":
 # ==========================================================
 # Visualizing the data
 # ==========================================================
-
 if __name__ == "__main__":
 
     grid = load_grid_exchange()
@@ -255,12 +258,13 @@ if __name__ == "__main__":
     plt.tight_layout()
     plt.show()
 
+
 # ==========================================================
 # EV demand LKW
 # ==========================================================
-def generate_lkw_profile(file_path, year=2025):
+def generate_lkw_profile(file_path=file_path, year=2025):
     """
-    Generate full-year 2025 as in the raw data, 15-minute LKW charging profile.
+    Generate full-year charging profile for 2025 in 15-minute intervall from single example day data.
 
     Assumptions:
         - Sheet contains one typical 15-min weekday
@@ -328,7 +332,7 @@ def generate_lkw_profile(file_path, year=2025):
 # ==========================================================
 # EV demand Zustellung
 # ==========================================================
-def generate_zustellung_profile(file_path, year=2026):
+def generate_zustellung_profile(file_path=file_path, year=2026):
     """
     Generate full-year 15-min Zustellung load profile.
 
