@@ -32,7 +32,7 @@ def select_sheets(label_text):
     selection = []
     root = tk.Tk()
     root.title("Select Trafo Data Sheet(s)")
-    root.geometry = ('100x100')
+    root.geometry('500x250')
 
     # Add a label at the top
     label = tk.Label(root, text=label_text, font=("Arial", 12, "bold"))
@@ -94,6 +94,41 @@ def convert_to_15min(df, column_name="power_kW"):
 
 
 # ==========================================================
+# 10 → 15 minute conversion
+# ==========================================================
+def convert_to_15min(df, column_name):
+    """
+    Convert a 10-minute average power time series (kW)
+    into a 15-minute average power time series (kW).
+
+        1) Convert power → energy (kWh)
+        2) Move energy to a 5-minute grid
+        3) Aggregate energy to 15-minute blocks
+        4) Convert energy back → power
+
+    This guarantees energy conservation.
+    """
+
+    df = df.copy()
+    df = df.set_index("timestamp")
+
+    df["energy_kWh"] = df[column_name] * (10 / 60)
+
+    # Upsample to 5-minute grid
+    df_5 = df["energy_kWh"].resample("5min").asfreq()
+    df_5 = df_5.ffill() / 2
+
+    # Aggregate to 15-minute
+    energy_15 = df_5.resample("15min").sum()
+
+    power_15 = energy_15 / (15 / 60)
+
+    result = power_15.reset_index()
+    result.columns = ["timestamp", column_name]
+
+    return result
+
+# ==========================================================
 # Generic trafo loader
 # ==========================================================
 def load_trafo(sheet_name):
@@ -148,9 +183,8 @@ def load_trafo(sheet_name):
 
     df = df.reset_index()
     df.columns = ["timestamp", "power_kW"]
-    df = convert_to_15min(df, "power_kW")
-
-    return df
+    df_15 = convert_to_15min(df,"power_kW")
+    return df_15
 
 
 # ==========================================================
@@ -184,45 +218,15 @@ def load_grid_exchange(sheet_trafo1="2024_Verbrauch_Trafo1", sheet_trafo2="2024_
     return df[["timestamp", "trafo1_kW", "trafo2_kW", "grid_exchange_kW"]]
 
 
-##TEST##
-'''
-if __name__ == "__main__":
 
-    print("=== TRAFO CHECK ===")
-    trafo1 = load_trafo("2024_Verbrauch_Trafo1")
-    trafo2 = load_trafo("2024_Verbrauch_Trafo2")
 
-    print("Trafo 1 rows:", len(trafo1))
-    print("Trafo 2 rows:", len(trafo2))
-
-    print("\nTime diff Trafo1:")
-    print(trafo1["timestamp"].diff().value_counts())
-
-    print("\n=== GRID EXCHANGE CHECK ===")
-    grid = load_grid_exchange()
-
-    print("Grid rows:", len(grid))
-    print(grid.head())
-
-    print("\nEnergy consistency check:")
-    energy_10 = (grid["grid_exchange_kW"] * (10/60)).sum()
-
-    grid_15 = convert_to_15min(grid, "grid_exchange_kW")
-    energy_15 = (grid_15["grid_exchange_kW"] * (15/60)).sum()
-
-    print("Total energy 10-min:", energy_10)
-    print("Total energy 15-min:", energy_15)
-
-    print("\n15-min spacing check:")
-    print(grid_15["timestamp"].diff().value_counts())
-'''
 
 # ==========================================================
 # Visualizing the data
 # ==========================================================
 if __name__ == "__main__":
 
-    grid = load_grid_exchange()
+    grid = load_grid_exchange(trafo_list)
 
     start_date = "2024-02-10"
     end_date   = "2024-02-11"
