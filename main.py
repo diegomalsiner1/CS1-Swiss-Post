@@ -14,25 +14,28 @@ from functools import reduce
 # ==========================================================
 dfs = []
 # Extract trafo data 
-trafo_sheets = dpp.select_sheets("Select sheets with trafo data:")
+trafo_sheets = dpp.select_sheets("Select sheets with grid exchange data:")
 trafo_df = dpp.load_grid_exchange(trafo_sheets)
+trafo_df = trafo_df[["timestamp", "grid_exchange_kW"]]
 dfs.append(trafo_df)
 
-# PV data (or just trafo2?)
+# PV data
 pv_sheets = dpp.select_sheets("Select the PV sheet")
-pv_df = dpp.load_trafo(pv_sheets[0])
-pv_df = pv_df.rename(columns={"power_kW": "PV_kW"})
+pv_df = dpp.load_grid_exchange(pv_sheets)
+pv_df = pv_df[["timestamp", "grid_exchange_kW"]].rename(columns={"grid_exchange_kW": "PV_kW"})
 dfs.append(pv_df)
 
 # ev data
-lkw = dpp.generate_lkw_profile(year=2024)
-zustellung = dpp.generate_zustellung_profile(year=2024)
-ev_total = lkw.merge(zustellung, on="timestamp", how="outer")
-dfs.append(ev_total)
+ev_df = dpp.generate_lkw_profile(year=2024)
+dfs.append(ev_df)
 
+# zustellung data
+zustellung_df = dpp.generate_zustellung_profile(year=2024)
+dfs.append(zustellung_df)
 
-# Merge all on 'timestamp' and export to csv
+# Merge all on 'timestamp', create total and export to csv
 merged_df = reduce(lambda left, right: pd.merge(left, right, on='timestamp', how="outer"), dfs)
+merged_df["total_kW"] = merged_df.drop(columns="timestamp").sum(axis=1)
 merged_df.to_csv("03-PROCESSED-DATA/data_processed.csv", index=False)
 
 #todo: check if data has been lost and act accordingly (dario: It might be that the PV modules were down for some reason. 
