@@ -20,10 +20,10 @@
     "max_capacity_kwh": 1000000,
     "max_inflow_kw": 10000,
     "max_outflow_kw": 10000,
-    "eta_charge": 0.9,
-    "eta_discharge": 0.95,
+    "eta_RTE": 0.9,
     "eta_self_discharge_per_step": 0.01,
-    "max_c_rate": 1.0,
+    "max_charging_c_rate": 1.0,
+    "max_discharging_c_rate": 1.0,
     "dod_max": 0.9
   },
 
