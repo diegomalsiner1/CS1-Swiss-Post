@@ -150,32 +150,6 @@ def load_trafo(sheet_name):
 # ==========================================================
 # Grid exchange (Trafo1 + Trafo2)
 # ==========================================================
-""" def load_grid_exchange(trafo_list):
-    """
-    Returns structured dataframe with:
-        timestamp
-        trafo1_kW
-        trafo2_kW
-        grid_exchange_kW
-    """
-
-    trafo1 = load_trafo(sheet_trafo1)
-    trafo2 = load_trafo(sheet_trafo2)
-
-    df = trafo1.merge(
-        trafo2,
-        on="timestamp",
-        suffixes=("_t1", "_t2")
-    )
-
-    df = df.rename(columns={
-        "power_kW_t1": "trafo1_kW",
-        "power_kW_t2": "trafo2_kW"
-    })
-
-    df["grid_exchange_kW"] = df["trafo1_kW"] + df["trafo2_kW"]
-
-    return df[["timestamp", "trafo1_kW", "trafo2_kW", "grid_exchange_kW"]] """
 
 sheets = select_sheets(file_path)
 
@@ -184,48 +158,7 @@ print(sheets)
 df_list = [load_trafo(sheet) for sheet in sheets]
 
 print(df_list)
-# ==========================================================
-# Visualizing the data
-# ==========================================================
-""" if __name__ == "__main__":
 
-    grid = load_grid_exchange(trafo_list)
-
-    start_date = "2024-02-10"
-    end_date   = "2024-02-11"
-
-    data = grid[
-        (grid["timestamp"] >= start_date) &
-        (grid["timestamp"] < end_date)
-    ].copy()
-
-    plt.figure()
-
-    plt.plot(data["timestamp"], data["trafo1_kW"])
-    plt.plot(data["timestamp"], data["trafo2_kW"])
-    plt.plot(data["timestamp"], data["grid_exchange_kW"])
-
-    # Dynamic axis formatting
-    if (pd.to_datetime(end_date) - pd.to_datetime(start_date)).days <= 1:
-        # Single day
-        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-        plt.gca().xaxis.set_major_locator(mdates.HourLocator(interval=1))
-    else:
-        # Multi-day
-        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%d-%m'))
-        plt.gca().xaxis.set_major_locator(mdates.DayLocator(interval=1))
-
-    plt.xticks(rotation=45)
-
-    plt.xlabel("Time")
-    plt.ylabel("Power (kW)")
-    plt.title(f"Trafo1, Trafo2 & Grid Exchange\n{start_date} to {end_date}")
-    plt.legend(["Trafo1", "Trafo2", "Grid Exchange"])
-
-    plt.tight_layout()
-    plt.show()
-
- """
 # ==========================================================
 # EV demand LKW
 # ==========================================================
@@ -410,34 +343,3 @@ def generate_zustellung_profile(file_path=file_path, year=2026):
 # ==========================================================
 # PLOT: LKW vs Zustellung vs Combined EV
 # ==========================================================
-# Generate profiles
-""" lkw = generate_lkw_profile(file_path, 2026)
-zustellung = generate_zustellung_profile(file_path, 2026)
-
-# Merge
-ev_total = lkw.merge(zustellung, on="timestamp")
-ev_total["ev_total_kW"] = (
-    ev_total["lkw_kW"] +
-    ev_total["zustellung_kW"]
-)
-
-# Select a timespan of interest
-week = ev_total[
-    (ev_total["timestamp"] >= "2026-01-05") &
-    (ev_total["timestamp"] < "2026-01-10")
-]
-
-# Single overlay plot
-plt.figure()
-plt.plot(week["timestamp"], week["lkw_kW"])
-plt.plot(week["timestamp"], week["zustellung_kW"])
-plt.plot(week["timestamp"], week["ev_total_kW"])
-
-plt.title("EV Charging Load")
-plt.xlabel("Timestamp")
-plt.ylabel("Power (kW)")
-plt.legend(["LKW", "Zustellung", "Combined EV"])
-plt.xticks(rotation=45)
-plt.tight_layout()
-plt.show()
- """
