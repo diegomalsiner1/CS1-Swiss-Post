@@ -106,14 +106,7 @@ def load_trafo(sheet_name):
 # ==========================================================
 # Grid exchange (Trafo1 + Trafo2)
 # ==========================================================
-def load_grid_exchange():
-    """
-    Returns structured dataframe with:
-        timestamp
-        trafo1_kW
-        trafo2_kW
-        grid_exchange_kW
-    """
+""" def load_grid_exchange():
 
     trafo1 = load_trafo("2024_Verbrauch_Trafo1")
     trafo2 = load_trafo("2024_Verbrauch_Trafo2")
@@ -131,8 +124,12 @@ def load_grid_exchange():
 
     df["grid_exchange_kW"] = df["trafo1_kW"] + df["trafo2_kW"]
 
-    return df[["timestamp", "trafo1_kW", "trafo2_kW", "grid_exchange_kW"]]
+    return df[["timestamp", "trafo1_kW", "trafo2_kW", "grid_exchange_kW"]] """
 
+def load_grid_exchange(trafo_list):
+    
+    """WIP"""
+    return 0
 # ==========================================================
 # 10 → 15 minute conversion
 # ==========================================================
@@ -174,9 +171,16 @@ def convert_to_15min(df, column_name):
 
 ##TEST##
 
-selection = select_sheets()
+sheets = select_sheets()
 
-print(selection)
+print(sheets)
+
+df_list = [load_trafo(sheet) for sheet in sheets]
+
+print(df_list)
+    
+
+
 
 ##TEST##
 '''
