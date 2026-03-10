@@ -25,9 +25,11 @@ pv_df = pv_df.rename(columns={"power_kW": "PV_kW"})
 dfs.append(pv_df)
 
 # ev data
-dfs.append(dpp.ev_total)
-#lkw = dpp.generate_lkw_profile(year=2025)
-#zustellung = dpp.generate_zustellung_profile(year=2025)
+lkw = dpp.generate_lkw_profile(year=2025)
+zustellung = dpp.generate_zustellung_profile(year=2025)
+ev_total = lkw.merge(zustellung, on="timestamp", how="outer")
+dfs.append(ev_total)
+
 
 # Merge all on 'timestamp' and export to csv
 merged_df = reduce(lambda left, right: pd.merge(left, right, on='timestamp', how="outer"), dfs)
