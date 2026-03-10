@@ -15,7 +15,7 @@ from functools import reduce
 dfs = []
 # Extract trafo data 
 trafo_sheets = dpp.select_sheets("Select sheets with trafo data:")
-trafo_df = dpp.load_grid_exchange(trafo_sheets[0], trafo_sheets[1])
+trafo_df = dpp.load_grid_exchange(trafo_sheets)
 dfs.append(trafo_df)
 
 # PV data (or just trafo2?)
