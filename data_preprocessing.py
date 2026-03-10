@@ -25,7 +25,7 @@ def select_sheets():
     selection = []
     root = tk.Tk()
     root.title("Select Trafo Data Sheet(s)")
-    root.geometry = ('100x100')
+    root.geometry('500x250')
 
     vars = [tk.IntVar() for sheet in sheet_list]
     btns = [tk.Checkbutton(root, text = sheet, variable = vars[sheet_list.index(sheet)],
@@ -44,6 +44,41 @@ def select_sheets():
     root.mainloop()
 
     return(selection)
+
+# ==========================================================
+# 10 → 15 minute conversion
+# ==========================================================
+def convert_to_15min(df, column_name):
+    """
+    Convert a 10-minute average power time series (kW)
+    into a 15-minute average power time series (kW).
+
+        1) Convert power → energy (kWh)
+        2) Move energy to a 5-minute grid
+        3) Aggregate energy to 15-minute blocks
+        4) Convert energy back → power
+
+    This guarantees energy conservation.
+    """
+
+    df = df.copy()
+    df = df.set_index("timestamp")
+
+    df["energy_kWh"] = df[column_name] * (10 / 60)
+
+    # Upsample to 5-minute grid
+    df_5 = df["energy_kWh"].resample("5min").asfreq()
+    df_5 = df_5.ffill() / 2
+
+    # Aggregate to 15-minute
+    energy_15 = df_5.resample("15min").sum()
+
+    power_15 = energy_15 / (15 / 60)
+
+    result = power_15.reset_index()
+    result.columns = ["timestamp", column_name]
+
+    return result
 
 # ==========================================================
 # Generic trafo loader
@@ -100,8 +135,8 @@ def load_trafo(sheet_name):
 
     df = df.reset_index()
     df.columns = ["timestamp", "power_kW"]
-
-    return df
+    df_15 = convert_to_15min(df,"power_kW")
+    return df_15
 
 # ==========================================================
 # Grid exchange (Trafo1 + Trafo2)
@@ -127,43 +162,10 @@ def load_trafo(sheet_name):
     return df[["timestamp", "trafo1_kW", "trafo2_kW", "grid_exchange_kW"]] """
 
 def load_grid_exchange(trafo_list):
-    
-    """WIP"""
-    return 0
-# ==========================================================
-# 10 → 15 minute conversion
-# ==========================================================
-def convert_to_15min(df, column_name):
-    """
-    Convert a 10-minute average power time series (kW)
-    into a 15-minute average power time series (kW).
 
-        1) Convert power → energy (kWh)
-        2) Move energy to a 5-minute grid
-        3) Aggregate energy to 15-minute blocks
-        4) Convert energy back → power
+    df_list = [load_trafo(trafo) for trafo in trafo_list]
 
-    This guarantees energy conservation.
-    """
-
-    df = df.copy()
-    df = df.set_index("timestamp")
-
-    df["energy_kWh"] = df[column_name] * (10 / 60)
-
-    # Upsample to 5-minute grid
-    df_5 = df["energy_kWh"].resample("5min").asfreq()
-    df_5 = df_5.ffill() / 2
-
-    # Aggregate to 15-minute
-    energy_15 = df_5.resample("15min").sum()
-
-    power_15 = energy_15 / (15 / 60)
-
-    result = power_15.reset_index()
-    result.columns = ["timestamp", column_name]
-
-    return result
+    return df_list
 
 # ==========================================================
 # Check
@@ -171,16 +173,12 @@ def convert_to_15min(df, column_name):
 
 ##TEST##
 
-sheets = select_sheets()
+trafo_list = select_sheets()
 
-print(sheets)
+print(trafo_list)
 
-df_list = [load_trafo(sheet) for sheet in sheets]
-
-print(df_list)
-    
-
-
+grid = load_grid_exchange(trafo_list)
+print(grid)
 
 ##TEST##
 '''
@@ -223,7 +221,7 @@ import matplotlib.dates as mdates
 
 if __name__ == "__main__":
 
-    grid = load_grid_exchange()
+    grid = load_grid_exchange(trafo_list)
 
     start_date = "2024-02-10"
     end_date   = "2024-02-11"
