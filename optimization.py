@@ -36,7 +36,7 @@ def setup(input_dict):
     lifetime = input_dict["parameters"]["lifetime"]
     battery_degrading = input_dict["parameters"]["battery_degrading"]
 
-    CRF = (((1+interest_rate)^lifetime) * interest_rate) / ((1+interest_rate)^lifetime - 1)
+    CRF = (((1+interest_rate)**lifetime) * interest_rate) / ((1+interest_rate)**lifetime - 1)
 
     ## Defining the timeseries of PV production, energy demand, and electricity prices
 
@@ -66,7 +66,7 @@ def setup(input_dict):
     print("Intitializing time dependent constraint functions")
     for t in tqdm(timesteps):
         # Power Flow Balance
-        model.Add(0 == Time_dependent_variables[("Grid_flow",t)] + Time_dependent_variables[("PV_out_flow",t)] + Time_dependent_variables[("Battery_out_flow",t)] - Time_dependent_variables[("Batterty_in_flow",t)] - input_dict["total_demand",t])
+        model.Add(0 == Time_dependent_variables[("Grid_flow",t)] + Time_dependent_variables[("PV_out_flow",t)] + Time_dependent_variables[("Battery_out_flow",t)] - Time_dependent_variables[("Battery_in_flow",t)] - input_dict["total_demand",t])
         # PV Power Output
         model.Add(Time_dependent_variables[("PV_out_flow",t)] == input_dict["PV_capacity_factor",t] * PV_max_capacity)
 
