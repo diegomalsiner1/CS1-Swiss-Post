@@ -178,7 +178,7 @@ def load_grid_exchange(trafo_sheets):
         if df is None:
             df = trafo
         else:
-            df = df.merge(trafo, on="timestamp")
+            df = df.merge(trafo, on="timestamp", how="outer")
 
     # total grid exchange
     df["grid_exchange_kW"] = df[trafo_cols].sum(axis=1)
