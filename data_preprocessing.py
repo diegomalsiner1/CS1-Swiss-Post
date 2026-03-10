@@ -45,13 +45,10 @@ def select_sheets(label_text):
     for btn in btns:
         btn.pack(side = 'top')
 
-    sbtn = tk.Button(root, text = 'Apply', 
+    sbtn = tk.Button(root, text = 'Apply & Exit', 
                         command = selection_list) 
     sbtn.pack(side = 'top')      
 
-    xbtn = tk.Button(root, text = 'Exit', 
-                        command = root.destroy) 
-    xbtn.pack(side = 'top')      
     root.mainloop()
 
     return(selection)
@@ -186,9 +183,7 @@ def load_grid_exchange(trafo_sheets):
     return df[["timestamp", *trafo_cols, "grid_exchange_kW"]]
 
 
-
-
-# ==========================================================
+"""# ==========================================================
 # Visualizing the data
 # ==========================================================
 if __name__ == "__main__":
@@ -227,7 +222,7 @@ if __name__ == "__main__":
     plt.legend(["Trafo1", "Trafo2", "Grid Exchange"])
 
     plt.tight_layout()
-    plt.show()
+    plt.show()"""
 
 
 # ==========================================================
@@ -414,33 +409,3 @@ def generate_zustellung_profile(file_path=file_path, year=2026):
 # ==========================================================
 # PLOT: LKW vs Zustellung vs Combined EV
 # ==========================================================
-# Generate profiles
-lkw = generate_lkw_profile(file_path, 2026)
-zustellung = generate_zustellung_profile(file_path, 2026)
-
-# Merge
-ev_total = lkw.merge(zustellung, on="timestamp")
-ev_total["ev_total_kW"] = (
-    ev_total["lkw_kW"] +
-    ev_total["zustellung_kW"]
-)
-
-# Select a timespan of interest
-week = ev_total[
-    (ev_total["timestamp"] >= "2026-01-05") &
-    (ev_total["timestamp"] < "2026-01-10")
-]
-
-# Single overlay plot
-plt.figure()
-plt.plot(week["timestamp"], week["lkw_kW"])
-plt.plot(week["timestamp"], week["zustellung_kW"])
-plt.plot(week["timestamp"], week["ev_total_kW"])
-
-plt.title("EV Charging Load")
-plt.xlabel("Timestamp")
-plt.ylabel("Power (kW)")
-plt.legend(["LKW", "Zustellung", "Combined EV"])
-plt.xticks(rotation=45)
-plt.tight_layout()
-plt.show()
