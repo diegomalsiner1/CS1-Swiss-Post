@@ -25,8 +25,8 @@ pv_df = pv_df.rename(columns={"power_kW": "PV_kW"})
 dfs.append(pv_df)
 
 # ev data
-lkw = dpp.generate_lkw_profile(year=2025)
-zustellung = dpp.generate_zustellung_profile(year=2025)
+lkw = dpp.generate_lkw_profile(year=2024)
+zustellung = dpp.generate_zustellung_profile(year=2024)
 ev_total = lkw.merge(zustellung, on="timestamp", how="outer")
 dfs.append(ev_total)
 

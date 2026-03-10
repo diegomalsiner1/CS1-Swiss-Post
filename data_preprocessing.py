@@ -31,7 +31,7 @@ def select_sheets(label_text):
     sheet_list = list(df.keys())
     selection = []
     root = tk.Tk()
-    root.title("Select Trafo Data Sheet(s)")
+    root.title("Select Data Sheet(s)")
     root.geometry('500x250')
 
     # Add a label at the top
