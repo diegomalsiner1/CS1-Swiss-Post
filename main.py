@@ -33,9 +33,14 @@ dfs.append(ev_df)
 zustellung_df = dpp.generate_zustellung_profile(year=2024)
 dfs.append(zustellung_df)
 
+# feed in tarif
+
+
+
 # Merge all on 'timestamp', create total and export to csv
 merged_df = reduce(lambda left, right: pd.merge(left, right, on='timestamp', how="outer"), dfs)
 merged_df["total_kW"] = merged_df.drop(columns="timestamp").sum(axis=1)
+merged_df["feed_in_tariff_CHF_per_kWh"] = 0.12 # temp constant feed in
 merged_df.to_csv("03-PROCESSED-DATA/data_processed.csv", index=False)
 
 #todo: check if data has been lost and act accordingly (dario: It might be that the PV modules were down for some reason. 
