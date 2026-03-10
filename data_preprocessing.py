@@ -45,53 +45,13 @@ def select_sheets(label_text):
     for btn in btns:
         btn.pack(side = 'top')
 
-    sbtn = tk.Button(root, text = 'Apply', 
+    sbtn = tk.Button(root, text = 'Apply & Exit', 
                         command = selection_list) 
     sbtn.pack(side = 'top')      
 
-    xbtn = tk.Button(root, text = 'Exit', 
-                        command = root.destroy) 
-    xbtn.pack(side = 'top')      
     root.mainloop()
 
     return(selection)
-
-
-# ==========================================================
-# 10 → 15 minute conversion
-# ==========================================================
-def convert_to_15min(df, column_name="power_kW"):
-    """
-    Convert a 10-minute average power time series (kW)
-    into a 15-minute average power time series (kW).
-
-        1) Convert power → energy (kWh)
-        2) Move energy to a 5-minute grid
-        3) Aggregate energy to 15-minute blocks
-        4) Convert energy back → power
-
-    This guarantees energy conservation.
-    """
-
-    df = df.copy()
-    df = df.set_index("timestamp")
-
-    df["energy_kWh"] = df[column_name] * (10 / 60)
-
-    # Upsample to 5-minute grid
-    df_5 = df["energy_kWh"].resample("5min").asfreq()
-    df_5 = df_5.ffill() / 2
-
-    # Aggregate to 15-minute
-    energy_15 = df_5.resample("15min").sum()
-
-    power_15 = energy_15 / (15 / 60)
-
-    result = power_15.reset_index()
-    result.columns = ["timestamp", column_name]
-
-    return result
-
 
 # ==========================================================
 # 10 → 15 minute conversion
@@ -190,7 +150,7 @@ def load_trafo(sheet_name):
 # ==========================================================
 # Grid exchange (Trafo1 + Trafo2)
 # ==========================================================
-def load_grid_exchange(sheet_trafo1="2024_Verbrauch_Trafo1", sheet_trafo2="2024_Verbrauch_Trafo2"):
+""" def load_grid_exchange(trafo_list):
     """
     Returns structured dataframe with:
         timestamp
@@ -215,16 +175,19 @@ def load_grid_exchange(sheet_trafo1="2024_Verbrauch_Trafo1", sheet_trafo2="2024_
 
     df["grid_exchange_kW"] = df["trafo1_kW"] + df["trafo2_kW"]
 
-    return df[["timestamp", "trafo1_kW", "trafo2_kW", "grid_exchange_kW"]]
+    return df[["timestamp", "trafo1_kW", "trafo2_kW", "grid_exchange_kW"]] """
 
+sheets = select_sheets(file_path)
 
+print(sheets)
 
+df_list = [load_trafo(sheet) for sheet in sheets]
 
-
+print(df_list)
 # ==========================================================
 # Visualizing the data
 # ==========================================================
-if __name__ == "__main__":
+""" if __name__ == "__main__":
 
     grid = load_grid_exchange(trafo_list)
 
@@ -262,7 +225,7 @@ if __name__ == "__main__":
     plt.tight_layout()
     plt.show()
 
-
+ """
 # ==========================================================
 # EV demand LKW
 # ==========================================================
@@ -448,7 +411,7 @@ def generate_zustellung_profile(file_path=file_path, year=2026):
 # PLOT: LKW vs Zustellung vs Combined EV
 # ==========================================================
 # Generate profiles
-lkw = generate_lkw_profile(file_path, 2026)
+""" lkw = generate_lkw_profile(file_path, 2026)
 zustellung = generate_zustellung_profile(file_path, 2026)
 
 # Merge
@@ -477,3 +440,4 @@ plt.legend(["LKW", "Zustellung", "Combined EV"])
 plt.xticks(rotation=45)
 plt.tight_layout()
 plt.show()
+ """
