@@ -90,40 +90,6 @@ def convert_to_15min(df, column_name="power_kW"):
     return result
 
 
-# ==========================================================
-# 10 → 15 minute conversion
-# ==========================================================
-def convert_to_15min(df, column_name):
-    """
-    Convert a 10-minute average power time series (kW)
-    into a 15-minute average power time series (kW).
-
-        1) Convert power → energy (kWh)
-        2) Move energy to a 5-minute grid
-        3) Aggregate energy to 15-minute blocks
-        4) Convert energy back → power
-
-    This guarantees energy conservation.
-    """
-
-    df = df.copy()
-    df = df.set_index("timestamp")
-
-    df["energy_kWh"] = df[column_name] * (10 / 60)
-
-    # Upsample to 5-minute grid
-    df_5 = df["energy_kWh"].resample("5min").asfreq()
-    df_5 = df_5.ffill() / 2
-
-    # Aggregate to 15-minute
-    energy_15 = df_5.resample("15min").sum()
-
-    power_15 = energy_15 / (15 / 60)
-
-    result = power_15.reset_index()
-    result.columns = ["timestamp", column_name]
-
-    return result
 
 # ==========================================================
 # Generic trafo loader
@@ -216,6 +182,7 @@ def load_grid_exchange(trafo_sheets):
     df["grid_exchange_kW"] = df[trafo_cols].sum(axis=1)
 
     return df[["timestamp", *trafo_cols, "grid_exchange_kW"]]
+
 
 # ==========================================================
 # EV demand LKW
@@ -398,6 +365,3 @@ def generate_zustellung_profile(file_path=file_path, year=2026):
 
     return result
 
-# ==========================================================
-# PLOT: LKW vs Zustellung vs Combined EV
-# ==========================================================
