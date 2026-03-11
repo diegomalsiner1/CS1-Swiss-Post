@@ -43,8 +43,8 @@ def setup(input_dict):
 
     ## Defining the required Variables
     Time_dependent_variables = {}
-    timesteps = range(input_dict.size()) ## to be changed
-    
+    # number of timesteps is driven by demand series length
+    timesteps = range(len(input_dict["total_demand"]))
 
     OPEX = model.NewIntVar(-np.INF, np.INF,f"Operational_Cost")
     Import_Cost = model.NewIntVar(-np.INF, np.INF,f"Import_Cost")
@@ -68,7 +68,7 @@ def setup(input_dict):
         # Power Flow Balance
         model.Add(0 == Time_dependent_variables[("Grid_flow",t)] + Time_dependent_variables[("PV_out_flow",t)] + Time_dependent_variables[("Battery_out_flow",t)] - Time_dependent_variables[("Battery_in_flow",t)] - input_dict["total_demand",t])
         # PV Power Output
-        model.Add(Time_dependent_variables[("PV_out_flow",t)] == input_dict["PV_capacity_factor",t] * PV_max_capacity)
+        model.Add(Time_dependent_variables[("PV_out_flow",t)] == input_dict["PV_capacity_factor"][t] * PV_max_capacity)
 
         # Equations for battery inflow and outflow
         model.Add(Time_dependent_variables[("Binary_battery_in_flow",t)] + Time_dependent_variables[("Binary_battery_out_flow",t)] <= 1)
@@ -84,7 +84,7 @@ def setup(input_dict):
     model.Add(Time_dependent_variables[("Battery_level",0)] == 0.5 * Battery_max_capacity)
     model.Add(Time_dependent_variables[("Battery_level",timesteps[-1])] == 0.5 * Battery_max_capacity)
     Import_Cost = sum(
-    Time_dependent_variables[("Grid_flow", t)] * input_dict[("electricity_price", t)]
+    Time_dependent_variables[("Grid_flow", t)] * input_dict["electricity_price"][t]
     for t in timesteps
 )
 
