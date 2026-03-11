@@ -12,6 +12,7 @@ import config
 
 
 INPUT_DICT_PATH = Path("03-PROCESSED-DATA/input_dict.json")
+DEBUG_INFEASIBILITY = True
 
 
 def build_input_dict_from_raw_data() -> dict:
@@ -67,11 +68,11 @@ def build_input_dict_from_raw_data() -> dict:
             "Battery_eta_charge": config.eta_charge,
             "Battery_eta_discharge": config.eta_discharge,
             "Battery_eta_self_discharge": config.eta_self_discharge,
-            "Battery_invest_cost": 450,
-            "operation_and_maintenance": 10000,
+            "Battery_invest_cost": config.invest_cost,
+            "operation_and_maintenance": config.operation_and_maintenance,
             "interest_rate": config.interest_rate,
             "lifetime": config.lifetime,
-            "battery_degrading": 0
+            "battery_degrading": config.battery_degrading
         },
         "total_demand": merged_df["total_demand"].tolist(),
         "PV_capacity_factor": merged_df["PV_capacity_factor"].tolist(),
@@ -101,8 +102,8 @@ def load_or_build_input_dict() -> dict:
 input_dict = load_or_build_input_dict()
 
 # Run optimization
-model = opt.setup(input_dict)
-model = opt.optimize_model(model)
+model, slacks = opt.setup(input_dict, debug_infeasibility=DEBUG_INFEASIBILITY)
+model = opt.optimize_model(model, slacks=slacks if DEBUG_INFEASIBILITY else None)
 
 print("Optimization finished")
 print("Objective OPEX", model.Objective().Value())
