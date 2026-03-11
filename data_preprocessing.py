@@ -7,6 +7,7 @@ from tkinter import filedialog
 
 ## Will be used to process the input data before feeding the data into the optimization framework
 
+
 file_path = filedialog.askopenfilename(initialdir = "01-INPUT-DATA",
                                           title = "Select Input Data",
                                           filetypes = [("Excel files", ".xlsx .xls")])
@@ -31,7 +32,7 @@ def select_sheets(label_text):
     sheet_list = list(df.keys())
     selection = []
     root = tk.Tk()
-    root.title("Select Trafo Data Sheet(s)")
+    root.title("Select Data Sheet(s)")
     root.geometry('500x250')
 
     # Add a label at the top
@@ -90,6 +91,28 @@ def convert_to_15min(df, column_name="power_kW"):
     return result
 
 
+def fill_missing_data(df):
+    """
+    expects: dataframe with timestamp of 15min intervalls
+
+    Fill missing values:
+    1. interpolate gaps up to 1h
+    2. fill remaining gaps using previous day
+    3. fill remaining gaps using next day
+    does this for up to two weeks max
+    """
+
+    df = df.interpolate(limit=4)
+
+    # fill from previous days
+    for i in range(1, 15):  # up to two weeks
+        df = df.fillna(df.shift(96 * i))
+
+    # fill from following days
+    for i in range(1, 15):
+        df = df.fillna(df.shift(-96 * i))
+
+    return df
 
 # ==========================================================
 # Generic trafo loader
