@@ -46,27 +46,28 @@ def setup(input_dict):
     # number of timesteps is driven by demand series length
     timesteps = range(len(input_dict["total_demand"]))
 
-    OPEX = model.NewIntVar(-np.INF, np.INF,f"Operational_Cost")
-    Import_Cost = model.NewIntVar(-np.INF, np.INF,f"Import_Cost")
+    inf = model.infinity()
+    OPEX = model.NumVar(-inf, inf, f"Operational_Cost")
+    Import_Cost = model.NumVar(-inf, inf, f"Import_Cost")
     print("Initializing time dependent variables")
     for t in tqdm(timesteps):
         # Integer Variables
-        Time_dependent_variables[("Battery_in_flow",t)] = model.NewIntVar(0, Battery_max_inflow, f"Powerflow_Batter_in_{t}")
-        Time_dependent_variables[("Battery_out_flow",t)] = model.NewIntVar(0, Battery_max_outflow, f"Powerflow_Batter_out_{t}")
-        Time_dependent_variables[("Grid_flow",t)] = model.NewIntVar(0, np.INF, f"Powerflow_Grid_{t}")
-        Time_dependent_variables[("Battery_level",t)] = model.NewIntVar(0, Battery_max_capacity, f"Battery_Level_{t}")
-        Time_dependent_variables[("PV_out_flow",t)] = model.NewIntVar(0, PV_max_capacity, f"PV_Powerflow_out_{t}")
+        Time_dependent_variables[("Battery_in_flow",t)] = model.NumVar(0, Battery_max_inflow, f"Powerflow_Batter_in_{t}")
+        Time_dependent_variables[("Battery_out_flow",t)] = model.NumVar(0, Battery_max_outflow, f"Powerflow_Batter_out_{t}")
+        Time_dependent_variables[("Grid_flow",t)] = model.NumVar(0, inf, f"Powerflow_Grid_{t}")
+        Time_dependent_variables[("Battery_level",t)] = model.NumVar(0, Battery_max_capacity, f"Battery_Level_{t}")
+        Time_dependent_variables[("PV_out_flow",t)] = model.NumVar(0, PV_max_capacity, f"PV_Powerflow_out_{t}")
 
         # Binary Variables
-        Time_dependent_variables[("Binary_battery_in_flow",t)] = model.NewBoolVar(f"Binary_battery_in_flow")
-        Time_dependent_variables[("Binary_battery_out_flow",t)] = model.NewBoolVar(f"Binary_battery_out_flow")
+        Time_dependent_variables[("Binary_battery_in_flow",t)] = model.BoolVar(f"Binary_battery_in_flow_{t}")
+        Time_dependent_variables[("Binary_battery_out_flow",t)] = model.BoolVar(f"Binary_battery_out_flow_{t}")
 
     ## Constraint functions
     # time dependent constraints
     print("Intitializing time dependent constraint functions")
     for t in tqdm(timesteps):
         # Power Flow Balance
-        model.Add(0 == Time_dependent_variables[("Grid_flow",t)] + Time_dependent_variables[("PV_out_flow",t)] + Time_dependent_variables[("Battery_out_flow",t)] - Time_dependent_variables[("Battery_in_flow",t)] - input_dict["total_demand",t])
+        model.Add(0 == Time_dependent_variables[("Grid_flow",t)] + Time_dependent_variables[("PV_out_flow",t)] + Time_dependent_variables[("Battery_out_flow",t)] - Time_dependent_variables[("Battery_in_flow",t)] - input_dict["total_demand"][t])
         # PV Power Output
         model.Add(Time_dependent_variables[("PV_out_flow",t)] == input_dict["PV_capacity_factor"][t] * PV_max_capacity)
 

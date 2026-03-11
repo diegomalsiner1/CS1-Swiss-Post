@@ -4,13 +4,27 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import tkinter as tk
 from tkinter import filedialog
+import config
 
 ## Will be used to process the input data before feeding the data into the optimization framework
 
+_selected_file_path = None
 
-file_path = filedialog.askopenfilename(initialdir = "01-INPUT-DATA",
-                                          title = "Select Input Data",
-                                          filetypes = [("Excel files", ".xlsx .xls")])
+
+def get_input_file_path():
+    """
+    Lazily open file picker once and cache the selected Excel path.
+    """
+    global _selected_file_path
+    if _selected_file_path is None:
+        _selected_file_path = filedialog.askopenfilename(
+            initialdir="01-INPUT-DATA",
+            title="Select Input Data",
+            filetypes=[("Excel files", ".xlsx .xls")]
+        )
+        if not _selected_file_path:
+            raise FileNotFoundError("No input data file selected.")
+    return _selected_file_path
 # ==========================================================
 # Select sheets from excel file
 # ==========================================================
@@ -28,7 +42,8 @@ def select_sheets(label_text):
 
         
 
-    df = pd.read_excel(file_path,sheet_name = None)
+    file_path = get_input_file_path()
+    df = pd.read_excel(file_path, sheet_name=None)
     sheet_list = list(df.keys())
     selection = []
     root = tk.Tk()
@@ -126,6 +141,7 @@ def load_trafo(sheet_name):
             power_kW (float)
     """
 
+    file_path = get_input_file_path()
     df = pd.read_excel(
         file_path,
         sheet_name=sheet_name,
@@ -210,7 +226,7 @@ def load_grid_exchange(trafo_sheets):
 # ==========================================================
 # EV demand LKW
 # ==========================================================
-def generate_lkw_profile(file_path=file_path, year=2025):
+def generate_lkw_profile(file_path=None, year=config.year):
     """
     Generate full-year charging profile for 2025 in 15-minute intervall from single example day data.
 
@@ -220,6 +236,9 @@ def generate_lkw_profile(file_path=file_path, year=2025):
         - Saturday and Sunday = 0
         - no seasonality
     """
+
+    if file_path is None:
+        file_path = get_input_file_path()
 
     df = pd.read_excel(
         file_path,
@@ -280,7 +299,7 @@ def generate_lkw_profile(file_path=file_path, year=2025):
 # ==========================================================
 # EV demand Zustellung
 # ==========================================================
-def generate_zustellung_profile(file_path=file_path, year=2026):
+def generate_zustellung_profile(file_path=None, year=2026):
     """
     Generate full-year 15-min Zustellung load profile.
 
@@ -290,6 +309,9 @@ def generate_zustellung_profile(file_path=file_path, year=2026):
     - Sunday = 0
     - Summer months reduced by 40%
     """
+
+    if file_path is None:
+        file_path = get_input_file_path()
 
     df = pd.read_excel(
         file_path,
