@@ -9,6 +9,7 @@ lifetime = 20 # [years]
 year =  2025 # 
 
 load_existing_input_dict = True # [True or False]
+max_timesteps = 500 # [None or int] Limit optimization horizon for faster/debug runs
 
 PV_max_capacity = 10000 # [kW]
 Battery_max_inflow = 10000 # [kW]

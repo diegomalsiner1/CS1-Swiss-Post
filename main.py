@@ -15,6 +15,35 @@ INPUT_DICT_PATH = Path("03-PROCESSED-DATA/input_dict.json")
 DEBUG_INFEASIBILITY = True
 
 
+def apply_timestep_cap(input_dict: dict, max_timesteps) -> dict:
+    """
+    Truncate all time-series entries in input_dict to max_timesteps.
+    """
+    if max_timesteps is None:
+        return input_dict
+
+    if not isinstance(max_timesteps, int) or max_timesteps <= 0:
+        raise ValueError("config.max_timesteps must be a positive integer or None")
+
+    series_keys = ["total_demand", "PV_capacity_factor", "electricity_price"]
+    available_lengths = [len(input_dict[k]) for k in series_keys if k in input_dict]
+    if not available_lengths:
+        return input_dict
+
+    current_steps = min(available_lengths)
+    target_steps = min(current_steps, max_timesteps)
+
+    if target_steps == current_steps:
+        return input_dict
+
+    for key in series_keys:
+        if key in input_dict:
+            input_dict[key] = input_dict[key][:target_steps]
+
+    print(f"Applied timestep cap: {current_steps} -> {target_steps}")
+    return input_dict
+
+
 def build_input_dict_from_raw_data() -> dict:
     # ==========================================================
     # Data Preprocessing
@@ -89,9 +118,19 @@ def load_or_build_input_dict() -> dict:
             )
         with INPUT_DICT_PATH.open("r", encoding="utf-8") as f:
             print(f"Loading input dictionary from {INPUT_DICT_PATH}")
-            return json.load(f)
+            input_dict = json.load(f)
+
+        steps_before = len(input_dict.get("total_demand", []))
+        input_dict = apply_timestep_cap(input_dict, config.max_timesteps)
+        steps_after = len(input_dict.get("total_demand", []))
+        if steps_after < steps_before:
+            with INPUT_DICT_PATH.open("w", encoding="utf-8") as f:
+                json.dump(input_dict, f)
+            print(f"Updated {INPUT_DICT_PATH} with capped time series")
+        return input_dict
 
     input_dict = build_input_dict_from_raw_data()
+    input_dict = apply_timestep_cap(input_dict, config.max_timesteps)
     INPUT_DICT_PATH.parent.mkdir(parents=True, exist_ok=True)
     with INPUT_DICT_PATH.open("w", encoding="utf-8") as f:
         json.dump(input_dict, f)

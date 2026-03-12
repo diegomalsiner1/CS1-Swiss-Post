@@ -142,8 +142,9 @@ def setup(input_dict, debug_infeasibility=False):
     if debug_infeasibility:
         model.Minimize(sum(slacks))
     else:
-        model.Add(OPEX == CRF * battery_invest_cost * Battery_max_capacity + battery_degrading + cost_operation_and_maintenance + import_cost_expr)
-        model.Minimize(OPEX)
+        #model.Add(OPEX == CRF * battery_invest_cost * Battery_max_capacity + battery_degrading + cost_operation_and_maintenance + import_cost_expr)
+        #model.Minimize(OPEX)
+        model.Minimize(0)
 
     return model, slacks
 
