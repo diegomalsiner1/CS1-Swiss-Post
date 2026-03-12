@@ -157,7 +157,8 @@ def optimize_model(model, slacks=None, top_n=20):
     Output:
     ortools.linear_solver.pywraplp.solver solved optimization model
     """
-
+    print("Running optimization")
+    model.EnableOutput()  # Enable solver output for debugging
     status = model.Solve()
 
     if status == model.OPTIMAL:

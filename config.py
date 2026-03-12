@@ -8,7 +8,7 @@ interest_rate = 0.06 # [-]
 lifetime = 20 # [years]
 year =  2025 # 
 
-load_existing_input_dict = False # [True or False]
+load_existing_input_dict = True # [True or False]
 
 PV_max_capacity = 10000 # [kW]
 Battery_max_inflow = 10000 # [kW]
@@ -16,7 +16,7 @@ Battery_max_outflow = 10000 # [kW]
 Battery_max_capacity = 1000000 # [kWh]
 eta_charge = 0.9 # [-]
 eta_discharge = 0.95 # [-]
-eta_self_discharge = 0.0# [-]
+eta_self_discharge = 0.0 # [-]
 invest_cost = 450 # [CHF/kWh]
 operation_and_maintenance = 10000 # [CHF/year]
 battery_degrading = 0.01 # [% per year]
