@@ -2,7 +2,9 @@ import pandas as pd
 import numpy as np
 from functools import reduce
 import json
+from datetime import datetime
 from pathlib import Path
+import time
 import optimization as opt
 import data_preprocessing as dpp
 import results_processing as rp
@@ -12,7 +14,48 @@ import config
 
 
 INPUT_DICT_PATH = Path("03-PROCESSED-DATA/input_dict.json")
-DEBUG_INFEASIBILITY = True
+RESULTS_ROOT = Path("02-MODEL-RESULTS")
+DEBUG_INFEASIBILITY = False
+
+
+def create_run_output_dir(input_dict: dict) -> Path:
+    mode = input_dict.get("parameters", {}).get("optimization_mode", "unknown")
+    n_steps = len(input_dict.get("total_demand", []))
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_dir = RESULTS_ROOT / f"{stamp}_{mode}_{n_steps}steps"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    return run_dir
+
+
+def save_run_artifacts(run_dir: Path, input_dict: dict, solution_summary: dict, runtime_s: float) -> None:
+    settings_snapshot = {
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "debug_infeasibility": DEBUG_INFEASIBILITY,
+        "load_existing_input_dict": config.load_existing_input_dict,
+        "max_timesteps": config.max_timesteps,
+        "timesteps_used": len(input_dict.get("total_demand", [])),
+        "parameters": input_dict.get("parameters", {}),
+    }
+
+    results_summary = {
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "runtime_seconds": runtime_s,
+        "objective_total_cost": float(solution_summary["objective_total_cost"]),
+        "battery_capacity_kwh": float(solution_summary["battery_capacity_kwh"]),
+        "opex": float(solution_summary["opex"]),
+        "import_cost": float(solution_summary["import_cost"]),
+        "fixed_om_cost": float(solution_summary["fixed_om_cost"]),
+        "annualized_battery_cost": float(solution_summary["annualized_battery_cost"]),
+    }
+
+    (run_dir / "settings_snapshot.json").write_text(
+        json.dumps(settings_snapshot, indent=2),
+        encoding="utf-8",
+    )
+    (run_dir / "results_summary.json").write_text(
+        json.dumps(results_summary, indent=2),
+        encoding="utf-8",
+    )
 
 
 def apply_timestep_cap(input_dict: dict, max_timesteps) -> dict:
@@ -101,7 +144,8 @@ def build_input_dict_from_raw_data() -> dict:
             "operation_and_maintenance": config.operation_and_maintenance,
             "interest_rate": config.interest_rate,
             "lifetime": config.lifetime,
-            "battery_degrading": config.battery_degrading
+            "battery_degrading": config.battery_degrading,
+            "optimization_mode": config.optimization_mode,
         },
         "total_demand": merged_df["total_demand"].tolist(),
         "PV_capacity_factor": merged_df["PV_capacity_factor"].tolist(),
@@ -139,13 +183,25 @@ def load_or_build_input_dict() -> dict:
 
 
 input_dict = load_or_build_input_dict()
+run_dir = create_run_output_dir(input_dict)
+run_start = time.perf_counter()
 
 # Run optimization
-model, slacks = opt.setup(input_dict, debug_infeasibility=DEBUG_INFEASIBILITY)
+model, slacks, solution_handles = opt.setup(input_dict, debug_infeasibility=DEBUG_INFEASIBILITY)
 model = opt.optimize_model(model, slacks=slacks if DEBUG_INFEASIBILITY else None)
+solution_summary = opt.summarize_solution(model, solution_handles)
+run_seconds = time.perf_counter() - run_start
+save_run_artifacts(run_dir, input_dict, solution_summary, run_seconds)
 
 print("Optimization finished")
-print("Objective OPEX", model.Objective().Value())
+print("Objective Total Cost", solution_summary["objective_total_cost"])
+print("Battery Capacity [kWh]", solution_summary["battery_capacity_kwh"])
+print("OPEX", solution_summary["opex"])
+print("Import Cost", solution_summary["import_cost"])
+print("Fixed O&M Cost", solution_summary["fixed_om_cost"])
+print("Annualized Battery Cost", solution_summary["annualized_battery_cost"])
+print("Runtime [s]", run_seconds)
+print("Saved run artifacts to", run_dir)
 #todo: check if data has been lost and act accordingly (dario: It might be that the PV modules were down for some reason. 
 # Just copy paste two weeks before that and two weeks after that for the missing PV data (24.10. Until 7.11. for the 
 # first two weeks of missing data and 10.12. Until 24.12 for the last two weeks of missing data, it’s an assumption) )

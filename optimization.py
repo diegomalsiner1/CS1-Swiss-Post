@@ -33,7 +33,7 @@ def setup(input_dict, debug_infeasibility=False):
     PV_max_capacity = input_dict["parameters"]["PV_max_capacity"]
     Battery_max_inflow = input_dict["parameters"]["Battery_max_inflow"]
     Battery_max_outflow = input_dict["parameters"]["Battery_max_outflow"]
-    Battery_max_capacity = input_dict["parameters"]["Battery_max_capacity"]
+    Battery_capacity_upper_bound = input_dict["parameters"]["Battery_max_capacity"]
     eta_charge = input_dict["parameters"]["Battery_eta_charge"]
     eta_discharge = input_dict["parameters"]["Battery_eta_discharge"]
     eta_self_discharge = input_dict["parameters"]["Battery_eta_self_discharge"]
@@ -43,6 +43,10 @@ def setup(input_dict, debug_infeasibility=False):
     interest_rate = input_dict["parameters"]["interest_rate"]
     lifetime = input_dict["parameters"]["lifetime"]
     battery_degrading = input_dict["parameters"]["battery_degrading"]
+    optimization_mode = input_dict["parameters"].get("optimization_mode", "milp").lower()
+    if optimization_mode not in {"milp", "lp"}:
+        raise ValueError("optimization_mode must be 'milp' or 'lp'")
+    use_binaries = optimization_mode == "milp"
 
     CRF = (((1+interest_rate)**lifetime) * interest_rate) / ((1+interest_rate)**lifetime - 1)
 
@@ -56,6 +60,8 @@ def setup(input_dict, debug_infeasibility=False):
 
     inf = model.infinity()
     OPEX = model.NumVar(-inf, inf, f"Operational_Cost")
+    Total_Cost = model.NumVar(-inf, inf, "Total_Cost")
+    Battery_capacity = model.NumVar(0, Battery_capacity_upper_bound, "Battery_Capacity")
     slacks = []
     print("Initializing time dependent variables")
     for t in tqdm(timesteps):
@@ -63,12 +69,12 @@ def setup(input_dict, debug_infeasibility=False):
         Time_dependent_variables[("Battery_in_flow",t)] = model.NumVar(0, Battery_max_inflow, f"Powerflow_Batter_in_{t}")
         Time_dependent_variables[("Battery_out_flow",t)] = model.NumVar(0, Battery_max_outflow, f"Powerflow_Batter_out_{t}")
         Time_dependent_variables[("Grid_flow",t)] = model.NumVar(0, inf, f"Powerflow_Grid_{t}")
-        Time_dependent_variables[("Battery_level",t)] = model.NumVar(0, Battery_max_capacity, f"Battery_Level_{t}")
+        Time_dependent_variables[("Battery_level",t)] = model.NumVar(0, Battery_capacity_upper_bound, f"Battery_Level_{t}")
         Time_dependent_variables[("PV_out_flow",t)] = model.NumVar(0, PV_max_capacity, f"PV_Powerflow_out_{t}")
 
-        # Binary Variables
-        Time_dependent_variables[("Binary_battery_in_flow",t)] = model.BoolVar(f"Binary_battery_in_flow_{t}")
-        Time_dependent_variables[("Binary_battery_out_flow",t)] = model.BoolVar(f"Binary_battery_out_flow_{t}")
+        if use_binaries:
+            Time_dependent_variables[("Binary_battery_in_flow",t)] = model.BoolVar(f"Binary_battery_in_flow_{t}")
+            Time_dependent_variables[("Binary_battery_out_flow",t)] = model.BoolVar(f"Binary_battery_out_flow_{t}")
 
     ## Constraint functions
     # time dependent constraints
@@ -99,10 +105,12 @@ def setup(input_dict, debug_infeasibility=False):
         else:
             model.Add(Time_dependent_variables[("PV_out_flow", t)] <= pv_limit_t)
 
-        # Equations for battery inflow and outflow
-        model.Add(Time_dependent_variables[("Binary_battery_in_flow",t)] + Time_dependent_variables[("Binary_battery_out_flow",t)] <= 1)
-        model.Add(Time_dependent_variables[("Battery_in_flow",t)] <= Time_dependent_variables[("Binary_battery_in_flow",t)] * Battery_max_inflow)
-        model.Add(Time_dependent_variables[("Battery_out_flow",t)] <= Time_dependent_variables[("Binary_battery_out_flow",t)] * Battery_max_outflow)
+        # MILP mode enforces explicit mutual exclusivity via binary on/off variables.
+        if use_binaries:
+            model.Add(Time_dependent_variables[("Binary_battery_in_flow",t)] + Time_dependent_variables[("Binary_battery_out_flow",t)] <= 1)
+            model.Add(Time_dependent_variables[("Battery_in_flow",t)] <= Time_dependent_variables[("Binary_battery_in_flow",t)] * Battery_max_inflow)
+            model.Add(Time_dependent_variables[("Battery_out_flow",t)] <= Time_dependent_variables[("Binary_battery_out_flow",t)] * Battery_max_outflow)
+        model.Add(Time_dependent_variables[("Battery_level", t)] <= Battery_capacity)
         if t != timesteps[-1]:
             # Equation to calculate the battery level in the next time step t+1 based on the current time step t
             soc_next_expr = (
@@ -124,29 +132,41 @@ def setup(input_dict, debug_infeasibility=False):
     if debug_infeasibility:
         s_soc_start = model.NumVar(0, inf, "slack_soc_start")
         s_soc_end = model.NumVar(0, inf, "slack_soc_end")
-        model.Add(Time_dependent_variables[("Battery_level", 0)] - 0.5 * Battery_max_capacity <= s_soc_start)
-        model.Add(0.5 * Battery_max_capacity - Time_dependent_variables[("Battery_level", 0)] <= s_soc_start)
-        model.Add(Time_dependent_variables[("Battery_level", timesteps[-1])] - 0.5 * Battery_max_capacity <= s_soc_end)
-        model.Add(0.5 * Battery_max_capacity - Time_dependent_variables[("Battery_level", timesteps[-1])] <= s_soc_end)
+        model.Add(Time_dependent_variables[("Battery_level", 0)] - 0.5 * Battery_capacity <= s_soc_start)
+        model.Add(0.5 * Battery_capacity - Time_dependent_variables[("Battery_level", 0)] <= s_soc_start)
+        model.Add(Time_dependent_variables[("Battery_level", timesteps[-1])] - 0.5 * Battery_capacity <= s_soc_end)
+        model.Add(0.5 * Battery_capacity - Time_dependent_variables[("Battery_level", timesteps[-1])] <= s_soc_end)
         slacks.extend([s_soc_start, s_soc_end])
     else:
-        model.Add(Time_dependent_variables[("Battery_level", 0)] == 0.5 * Battery_max_capacity)
-        model.Add(Time_dependent_variables[("Battery_level", timesteps[-1])] == 0.5 * Battery_max_capacity)
+        model.Add(Time_dependent_variables[("Battery_level", 0)] == 0.5 * Battery_capacity)
+        model.Add(Time_dependent_variables[("Battery_level", timesteps[-1])] == 0.5 * Battery_capacity)
 
+    timestep_hours = 0.25
     import_cost_expr = sum(
-        Time_dependent_variables[("Grid_flow", t)] * input_dict["electricity_price"][t]
+        Time_dependent_variables[("Grid_flow", t)] * input_dict["electricity_price"][t] * timestep_hours
         for t in timesteps
     )
+    annualized_battery_cost_expr = CRF * battery_invest_cost * Battery_capacity
 
     # Objective function
     if debug_infeasibility:
         model.Minimize(sum(slacks))
     else:
-        #model.Add(OPEX == CRF * battery_invest_cost * Battery_max_capacity + battery_degrading + cost_operation_and_maintenance + import_cost_expr)
-        #model.Minimize(OPEX)
-        model.Minimize(0)
+        opex_expr = cost_operation_and_maintenance + import_cost_expr
+        model.Add(OPEX == opex_expr)
+        model.Add(Total_Cost == annualized_battery_cost_expr + OPEX)
+        model.Minimize(Total_Cost)
 
-    return model, slacks
+    solution_handles = {
+        "battery_capacity": Battery_capacity,
+        "opex": OPEX,
+        "total_cost": Total_Cost,
+        "annualized_battery_cost_expr": annualized_battery_cost_expr,
+        "import_cost_expr": import_cost_expr,
+        "fixed_om_cost": cost_operation_and_maintenance,
+    }
+
+    return model, slacks, solution_handles
 
 
 def optimize_model(model, slacks=None, top_n=20):
@@ -174,3 +194,14 @@ def optimize_model(model, slacks=None, top_n=20):
     else:
         raise ValueError(f'Did not find optimal solution: {status}')
     return model
+
+
+def summarize_solution(model, solution_handles):
+    return {
+        "battery_capacity_kwh": solution_handles["battery_capacity"].solution_value(),
+        "objective_total_cost": model.Objective().Value(),
+        "opex": solution_handles["opex"].solution_value(),
+        "import_cost": solution_handles["import_cost_expr"].solution_value(),
+        "fixed_om_cost": solution_handles["fixed_om_cost"],
+        "annualized_battery_cost": solution_handles["annualized_battery_cost_expr"].solution_value(),
+    }

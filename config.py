@@ -8,18 +8,20 @@ interest_rate = 0.06 # [-]
 lifetime = 20 # [years]
 year =  2025 # 
 
-load_existing_input_dict = True # [True or False]
-max_timesteps = 500 # [None or int] Limit optimization horizon for faster/debug runs
+load_existing_input_dict = False # [True or False]
+max_timesteps = 40000 # [None or int] Limit optimization horizon for faster/debug runs
+optimization_mode = "milp" # ["milp" or "lp"]
 
 PV_max_capacity = 10000 # [kW]
-Battery_max_inflow = 10000 # [kW]
-Battery_max_outflow = 10000 # [kW]
-Battery_max_capacity = 1000000 # [kWh]
+Battery_max_inflow = 1000 # [kW]
+Battery_max_outflow = 1000 # [kW]
+Battery_max_capacity = 100000 # [kWh]
 eta_charge = 0.9 # [-]
 eta_discharge = 0.95 # [-]
 eta_self_discharge = 0.0 # [-]
 invest_cost = 450 # [CHF/kWh]
-operation_and_maintenance = 10000 # [CHF/year]
+operation_and_maintenance = 10000 * (
+    max_timesteps / (24 * 4 * 365) if max_timesteps is not None else 1) 
 battery_degrading = 0.01 # [% per year]
 
 def load_config(path: str = "config.json") -> dict:
