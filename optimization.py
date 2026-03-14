@@ -64,6 +64,12 @@ def setup(input_dict, debug_infeasibility=False):
     Battery_capacity = model.NumVar(0, Battery_capacity_upper_bound, "Battery_Capacity")
     slacks = []
     print("Initializing time dependent variables")
+    battery_level_vars = []
+    battery_in_flow_vars = []
+    battery_out_flow_vars = []
+    grid_flow_vars = []
+    pv_out_flow_vars = []
+
     for t in tqdm(timesteps):
         # Integer Variables
         Time_dependent_variables[("Battery_in_flow",t)] = model.NumVar(0, Battery_max_inflow, f"Powerflow_Batter_in_{t}")
@@ -71,6 +77,12 @@ def setup(input_dict, debug_infeasibility=False):
         Time_dependent_variables[("Grid_flow",t)] = model.NumVar(0, inf, f"Powerflow_Grid_{t}")
         Time_dependent_variables[("Battery_level",t)] = model.NumVar(0, Battery_capacity_upper_bound, f"Battery_Level_{t}")
         Time_dependent_variables[("PV_out_flow",t)] = model.NumVar(0, PV_max_capacity, f"PV_Powerflow_out_{t}")
+
+        battery_in_flow_vars.append(Time_dependent_variables[("Battery_in_flow", t)])
+        battery_out_flow_vars.append(Time_dependent_variables[("Battery_out_flow", t)])
+        battery_level_vars.append(Time_dependent_variables[("Battery_level", t)])
+        grid_flow_vars.append(Time_dependent_variables[("Grid_flow", t)])
+        pv_out_flow_vars.append(Time_dependent_variables[("PV_out_flow", t)])
 
         if use_binaries:
             Time_dependent_variables[("Binary_battery_in_flow",t)] = model.BoolVar(f"Binary_battery_in_flow_{t}")
@@ -164,6 +176,11 @@ def setup(input_dict, debug_infeasibility=False):
         "annualized_battery_cost_expr": annualized_battery_cost_expr,
         "import_cost_expr": import_cost_expr,
         "fixed_om_cost": cost_operation_and_maintenance,
+        "battery_level_vars": battery_level_vars,
+        "battery_in_flow_vars": battery_in_flow_vars,
+        "battery_out_flow_vars": battery_out_flow_vars,
+        "grid_flow_vars": grid_flow_vars,
+        "pv_out_flow_vars": pv_out_flow_vars,
     }
 
     return model, slacks, solution_handles
@@ -204,4 +221,24 @@ def summarize_solution(model, solution_handles):
         "import_cost": solution_handles["import_cost_expr"].solution_value(),
         "fixed_om_cost": solution_handles["fixed_om_cost"],
         "annualized_battery_cost": solution_handles["annualized_battery_cost_expr"].solution_value(),
+    }
+
+
+def compute_no_battery_baseline(input_dict):
+    """Compute the baseline import cost with no battery (all PV used to satisfy demand)."""
+    timestep_hours = 0.25
+    if len(input_dict.get("total_demand", [])) != len(input_dict.get("PV_capacity_factor", [])):
+        raise ValueError("Input timeseries lengths must match for baseline computation.")
+
+    total_import_cost = 0.0
+    for t, demand in enumerate(input_dict["total_demand"]):
+        pv_limit = input_dict["PV_capacity_factor"][t] * input_dict["parameters"]["PV_max_capacity"]
+        imported_energy = max(0.0, demand - pv_limit)
+        price = input_dict["electricity_price"][t]
+        total_import_cost += imported_energy * price * timestep_hours
+
+    no_battery_opex = input_dict["parameters"].get("operation_and_maintenance", 0.0)
+    return {
+        "no_battery_import_cost": total_import_cost,
+        "no_battery_total_cost": no_battery_opex + total_import_cost,
     }

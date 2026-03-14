@@ -1,0 +1,15 @@
+{
+  "timestamp": "2026-03-14T17:45:33",
+  "runtime_seconds": 24.732151099975454,
+  "objective_total_cost": 284101.7776595641,
+  "battery_capacity_kwh": 969.6623652631579,
+  "opex": 246058.96497989667,
+  "import_cost": 234643.43986574435,
+  "fixed_om_cost": 11415.52511415525,
+  "annualized_battery_cost": 38042.81267966743,
+  "no_battery_import_cost": 294068.9387261014,
+  "no_battery_total_cost": 305484.4638402567,
+  "npv": NaN,
+  "irr": NaN,
+  "payback_years": NaN
+}

@@ -1,0 +1,22 @@
+{
+  "timestamp": "2026-03-14T17:50:58",
+  "debug_infeasibility": false,
+  "load_existing_input_dict": true,
+  "max_timesteps": 40000,
+  "timesteps_used": 40000,
+  "parameters": {
+    "PV_max_capacity": 10000,
+    "Battery_max_inflow": 1000,
+    "Battery_max_outflow": 1000,
+    "Battery_max_capacity": 100000,
+    "Battery_eta_charge": 0.9,
+    "Battery_eta_discharge": 0.95,
+    "Battery_eta_self_discharge": 0.0,
+    "Battery_invest_cost": 450,
+    "operation_and_maintenance": 11415.52511415525,
+    "interest_rate": 0.06,
+    "lifetime": 20,
+    "battery_degrading": 0.01,
+    "optimization_mode": "lp"
+  }
+}

@@ -8,9 +8,9 @@ interest_rate = 0.06 # [-]
 lifetime = 20 # [years]
 year =  2025 # 
 
-load_existing_input_dict = False # [True or False]
+load_existing_input_dict = True # [True or False]
 max_timesteps = 40000 # [None or int] Limit optimization horizon for faster/debug runs
-optimization_mode = "milp" # ["milp" or "lp"]
+optimization_mode = "lp" # ["milp" or "lp"]
 
 PV_max_capacity = 10000 # [kW]
 Battery_max_inflow = 1000 # [kW]
