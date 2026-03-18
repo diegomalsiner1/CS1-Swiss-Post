@@ -46,6 +46,11 @@ def save_run_artifacts(run_dir: Path, input_dict: dict, solution_summary: dict, 
         "import_cost": float(solution_summary["import_cost"]),
         "fixed_om_cost": float(solution_summary["fixed_om_cost"]),
         "annualized_battery_cost": float(solution_summary["annualized_battery_cost"]),
+        "no_battery_import_cost": float(solution_summary.get("no_battery_import_cost", 0.0)),
+        "no_battery_total_cost": float(solution_summary.get("no_battery_total_cost", 0.0)),
+        "npv": float(solution_summary.get("npv", np.nan)),
+        "irr": float(solution_summary.get("irr", np.nan)),
+        "payback_years": float(solution_summary.get("payback_years", np.nan)),
     }
 
     (run_dir / "settings_snapshot.json").write_text(
@@ -68,7 +73,7 @@ def apply_timestep_cap(input_dict: dict, max_timesteps) -> dict:
     if not isinstance(max_timesteps, int) or max_timesteps <= 0:
         raise ValueError("config.max_timesteps must be a positive integer or None")
 
-    series_keys = ["total_demand", "PV_capacity_factor", "electricity_price"]
+    series_keys = ["timestamps", "total_demand", "PV_capacity_factor", "electricity_price"]
     available_lengths = [len(input_dict[k]) for k in series_keys if k in input_dict]
     if not available_lengths:
         return input_dict
@@ -147,6 +152,7 @@ def build_input_dict_from_raw_data() -> dict:
             "battery_degrading": config.battery_degrading,
             "optimization_mode": config.optimization_mode,
         },
+        "timestamps": merged_df["timestamp"].astype(str).tolist(),
         "total_demand": merged_df["total_demand"].tolist(),
         "PV_capacity_factor": merged_df["PV_capacity_factor"].tolist(),
         "electricity_price": merged_df["electricity_price"].tolist()
@@ -191,7 +197,25 @@ model, slacks, solution_handles = opt.setup(input_dict, debug_infeasibility=DEBU
 model = opt.optimize_model(model, slacks=slacks if DEBUG_INFEASIBILITY else None)
 solution_summary = opt.summarize_solution(model, solution_handles)
 run_seconds = time.perf_counter() - run_start
+baseline_summary = opt.compute_no_battery_baseline(input_dict)
+solution_summary.update(baseline_summary)
 save_run_artifacts(run_dir, input_dict, solution_summary, run_seconds)
+
+battery_soc = [v.solution_value() for v in solution_handles["battery_level_vars"]]
+pv_flow = [v.solution_value() for v in solution_handles["pv_out_flow_vars"]]
+grid_flow = [v.solution_value() for v in solution_handles["grid_flow_vars"]]
+total_load = input_dict.get("total_demand", [])
+timestamps = input_dict.get("timestamps")
+rp.export_results_excel(
+    run_dir,
+    solution_summary,
+    battery_soc,
+    timestamps=timestamps,
+    input_dict=input_dict,
+    pv_flow=pv_flow,
+    grid_flow=grid_flow,
+    total_load=total_load,
+)
 
 print("Optimization finished")
 print("Objective Total Cost", solution_summary["objective_total_cost"])
