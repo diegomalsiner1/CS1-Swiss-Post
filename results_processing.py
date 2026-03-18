@@ -61,8 +61,8 @@ def compute_financial_summary(input_dict, solution_summary):
     return financial_summary
 
 
-def export_results_excel(run_dir, solution_summary, battery_soc, timestamps=None, input_dict=None, pv_flow=None, grid_flow=None, total_load=None, battery_in_flow=None, battery_out_flow=None):
-    """Export KPI summary, per-timestep time series, and charts to Excel/PNG."""
+def export_results_excel(run_dir, solution_summary, battery_soc, timestamps=None, input_dict=None, pv_flow=None, grid_flow=None, total_load=None):
+    """Export KPI summary and SOC chart data to a single Excel file and PNG chart."""
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -99,26 +99,11 @@ def export_results_excel(run_dir, solution_summary, battery_soc, timestamps=None
     else:
         soc_df = pd.DataFrame({"timestamp": np.arange(len(battery_soc)), "battery_soc": battery_soc})
 
-    # Per-timestep data sheet and CSV
-    timeseries_dict = {
-        "timestamp": soc_df["timestamp"].tolist(),
-        "battery_soc": battery_soc,
-        "pv_flow": pv_flow if pv_flow is not None else [np.nan] * len(battery_soc),
-        "grid_flow": grid_flow if grid_flow is not None else [np.nan] * len(battery_soc),
-        "total_load": total_load if total_load is not None else [np.nan] * len(battery_soc),
-        "battery_in_flow": battery_in_flow if battery_in_flow is not None else [np.nan] * len(battery_soc),
-        "battery_out_flow": battery_out_flow if battery_out_flow is not None else [np.nan] * len(battery_soc),
-    }
-    timeseries_df = pd.DataFrame(timeseries_dict)
-    timeseries_csv_path = run_dir / "time_series_results.csv"
-    timeseries_df.to_csv(timeseries_csv_path, index=False)
-
     # Save Excel with KPI + SOC sheet
     out_excel = run_dir / "results_summary.xlsx"
     with pd.ExcelWriter(out_excel, engine="openpyxl") as writer:
         kpi_df.to_excel(writer, sheet_name="KPIs", index=False)
         soc_df.to_excel(writer, sheet_name="Battery_SOC", index=False)
-        timeseries_df.to_excel(writer, sheet_name="Time_Series", index=False)
 
 
 

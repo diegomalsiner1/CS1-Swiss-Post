@@ -199,16 +199,11 @@ solution_summary = opt.summarize_solution(model, solution_handles)
 run_seconds = time.perf_counter() - run_start
 baseline_summary = opt.compute_no_battery_baseline(input_dict)
 solution_summary.update(baseline_summary)
-
-# Keep per-timestep arrays in solution summary
-timestep_results = opt.extract_timestep_results(solution_handles)
-solution_summary.update(timestep_results)
-
 save_run_artifacts(run_dir, input_dict, solution_summary, run_seconds)
 
-battery_soc = solution_summary["battery_soc"]
-pv_flow = solution_summary["pv_flow"]
-grid_flow = solution_summary["grid_flow"]
+battery_soc = [v.solution_value() for v in solution_handles["battery_level_vars"]]
+pv_flow = [v.solution_value() for v in solution_handles["pv_out_flow_vars"]]
+grid_flow = [v.solution_value() for v in solution_handles["grid_flow_vars"]]
 total_load = input_dict.get("total_demand", [])
 timestamps = input_dict.get("timestamps")
 rp.export_results_excel(
@@ -220,8 +215,6 @@ rp.export_results_excel(
     pv_flow=pv_flow,
     grid_flow=grid_flow,
     total_load=total_load,
-    battery_in_flow=solution_summary["battery_in_flow"],
-    battery_out_flow=solution_summary["battery_out_flow"],
 )
 
 print("Optimization finished")
