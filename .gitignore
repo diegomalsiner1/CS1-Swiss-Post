@@ -2,4 +2,5 @@ venv/
 .vscode/
 .DS_Store
 __pycache__/
-02-MODEL-RESULTS/
+02-MODEL-RESULTS/*
+!02-MODEL-RESULTS/.gitkeep
