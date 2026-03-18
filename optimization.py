@@ -186,6 +186,35 @@ def setup(input_dict, debug_infeasibility=False):
     return model, slacks, solution_handles
 
 
+def summarize_solution(model, solution_handles):
+    """Summarize solved model into scalar KPIs and per-timestep time series."""
+    summary = {
+        "battery_capacity_kwh": solution_handles["battery_capacity"].solution_value(),
+        "objective_total_cost": model.Objective().Value(),
+        "opex": solution_handles["opex"].solution_value(),
+        "import_cost": solution_handles["import_cost_expr"].solution_value(),
+        "fixed_om_cost": solution_handles["fixed_om_cost"],
+        "annualized_battery_cost": solution_handles["annualized_battery_cost_expr"].solution_value(),
+        "battery_soc": [v.solution_value() for v in solution_handles["battery_level_vars"]],
+        "battery_in_flow": [v.solution_value() for v in solution_handles["battery_in_flow_vars"]],
+        "battery_out_flow": [v.solution_value() for v in solution_handles["battery_out_flow_vars"]],
+        "grid_flow": [v.solution_value() for v in solution_handles["grid_flow_vars"]],
+        "pv_flow": [v.solution_value() for v in solution_handles["pv_out_flow_vars"]],
+    }
+    return summary
+
+
+def extract_timestep_results(solution_handles):
+    """Extract per-timestep time series arrays from solved variable handles."""
+    return {
+        "battery_soc": [v.solution_value() for v in solution_handles["battery_level_vars"]],
+        "battery_in_flow": [v.solution_value() for v in solution_handles["battery_in_flow_vars"]],
+        "battery_out_flow": [v.solution_value() for v in solution_handles["battery_out_flow_vars"]],
+        "grid_flow": [v.solution_value() for v in solution_handles["grid_flow_vars"]],
+        "pv_flow": [v.solution_value() for v in solution_handles["pv_out_flow_vars"]],
+    }
+
+
 def optimize_model(model, slacks=None, top_n=20):
     """
     Method for optimizing the a constrainted model
@@ -211,17 +240,6 @@ def optimize_model(model, slacks=None, top_n=20):
     else:
         raise ValueError(f'Did not find optimal solution: {status}')
     return model
-
-
-def summarize_solution(model, solution_handles):
-    return {
-        "battery_capacity_kwh": solution_handles["battery_capacity"].solution_value(),
-        "objective_total_cost": model.Objective().Value(),
-        "opex": solution_handles["opex"].solution_value(),
-        "import_cost": solution_handles["import_cost_expr"].solution_value(),
-        "fixed_om_cost": solution_handles["fixed_om_cost"],
-        "annualized_battery_cost": solution_handles["annualized_battery_cost_expr"].solution_value(),
-    }
 
 
 def compute_no_battery_baseline(input_dict):
