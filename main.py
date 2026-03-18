@@ -206,7 +206,7 @@ pv_flow = [v.solution_value() for v in solution_handles["pv_out_flow_vars"]]
 grid_flow = [v.solution_value() for v in solution_handles["grid_flow_vars"]]
 total_load = input_dict.get("total_demand", [])
 timestamps = input_dict.get("timestamps")
-rp.export_results_excel(
+rp.export_results(
     run_dir,
     solution_summary,
     battery_soc,
