@@ -6,7 +6,7 @@ from tqdm import tqdm
 ## Will be used to define the optimization variables, constraints, and the objective function
 
 
-def setup(input_dict, debug_infeasibility=False):
+def setup(input_dict, debug_infeasibility=False, fixed_battery_capacity_kwh=None):
     """
     Method for setting up the optimization problem
 
@@ -139,6 +139,11 @@ def setup(input_dict, debug_infeasibility=False):
                 model.Add(Time_dependent_variables[("Battery_level", t + 1)] == soc_next_expr)
 
 
+
+    if fixed_battery_capacity_kwh is not None:
+        if fixed_battery_capacity_kwh < 0 or fixed_battery_capacity_kwh > Battery_capacity_upper_bound:
+            raise ValueError("fixed_battery_capacity_kwh must be within [0, Battery_max_capacity].")
+        model.Add(Battery_capacity == fixed_battery_capacity_kwh)
 
     # starting conditions
     if debug_infeasibility:

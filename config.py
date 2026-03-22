@@ -11,6 +11,8 @@ year =  2025 #
 load_existing_input_dict = True # [True or False]
 max_timesteps = 40000 # [None or int] Limit optimization horizon for faster/debug runs
 optimization_mode = "lp" # ["milp" or "lp"]
+run_battery_size_sensitivity = True # [True or False]
+battery_sensitivity_sizes_kwh = [0, 250, 500, 750, 1000, 1250, 1500, 1750, 2000]
 
 PV_max_capacity = 10000 # [kW]
 Battery_max_inflow = 1000 # [kW]
