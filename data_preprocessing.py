@@ -273,7 +273,7 @@ def load_grid_exchange(trafo_sheets):
 # ==========================================================
 # EV demand LKW
 # ==========================================================
-def generate_lkw_profile(file_path=None, year=None):
+def generate_lkw_profile(file_path=None, year=None, sheet_name=None):
     """
     Generate full-year charging profile for 2025 in 15-minute intervall from single example day data.
 
@@ -290,10 +290,14 @@ def generate_lkw_profile(file_path=None, year=None):
     if year is None:
         print("no year detected for charging profile generation")
         return
+    
+    if sheet_name is None:
+        print("no worksheet selected for charging profile generation")
+        return
 
     df = pd.read_excel(
         file_path,
-        sheet_name="Zubau_LKW_Aug2025",
+        sheet_name=sheet_name,
         header=1
     )
 
@@ -350,7 +354,7 @@ def generate_lkw_profile(file_path=None, year=None):
 # ==========================================================
 # EV demand Zustellung
 # ==========================================================
-def generate_zustellung_profile(file_path=None, year=None):
+def generate_zustellung_profile(file_path=None, year=None, sheet_name=None):
     """
     Generate full-year 15-min Zustellung load profile.
 
@@ -367,10 +371,14 @@ def generate_zustellung_profile(file_path=None, year=None):
     if year is None:
         print("no year detected for delivery profile generation")
         return
+    
+    if sheet_name is None:
+        print("no worksheet selected for delivery profile generation")
+        return
 
     df = pd.read_excel(
         file_path,
-        sheet_name="Zubau_Zustellung_Oct2026",
+        sheet_name=sheet_name,
         header=0
     )
 

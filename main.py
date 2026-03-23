@@ -108,8 +108,10 @@ def build_input_dict_from_raw_data() -> dict:
     dfs.append(pv_df)
 
     # EV data
-    lkw = dpp.generate_lkw_profile(year=year)
-    zustellung = dpp.generate_zustellung_profile(year=year)
+    ev_ChargingSheet = dpp.select_sheets("Select the EV charging sheet")
+    dist_sheet = dpp.select_sheets("Select the sheet with the distribution profile")
+    lkw = dpp.generate_lkw_profile(year=year, sheet_name=ev_ChargingSheet[0])
+    zustellung = dpp.generate_zustellung_profile(year=year, sheet_name=dist_sheet[0])
     ev_total = lkw.merge(zustellung, on="timestamp", how="outer")
     dfs.append(ev_total)
 
