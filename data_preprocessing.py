@@ -4,12 +4,10 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import tkinter as tk
 from tkinter import filedialog
-import config
 
 ## Will be used to process the input data before feeding the data into the optimization framework
 
 _selected_file_path = None
-
 
 def get_input_file_path():
     """
@@ -25,6 +23,54 @@ def get_input_file_path():
         if not _selected_file_path:
             raise FileNotFoundError("No input data file selected.")
     return _selected_file_path
+
+
+# ==========================================================
+# config reading and generation
+# ==========================================================
+def write_config_py(config, filename="config.py"):
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write("# Auto-generated from Excel - DO NOT EDIT MANUALLY\n\n")
+
+        for key, value in config.items():
+
+            # format strings properly
+            if isinstance(value, str):
+                f.write(f'{key} = "{value}"\n')
+
+            else:
+                f.write(f"{key} = {value}\n")
+
+def clean_value(v):
+    if isinstance(v, str):
+        v = v.strip()
+
+        if v.lower() == "true":
+            return True
+        if v.lower() == "false":
+            return False
+
+        try:
+            if "." in v:
+                return float(v)
+            return int(v)
+        except:
+            return v
+
+    return v
+
+get_input_file_path()
+config_df = pd.read_excel(_selected_file_path, sheet_name="config")
+config_dict = {
+    row["variable"]: clean_value(row["value"])
+    for _, row in config_df.iterrows()
+}
+max_timesteps = config_dict.get("max_timesteps")
+config_dict["operation_and_maintenance"] = 10000 * (
+    max_timesteps / (24 * 4 * 365) if max_timesteps is not None else 1
+)
+write_config_py(config_dict)
+
 # ==========================================================
 # Select sheets from excel file
 # ==========================================================
@@ -68,6 +114,7 @@ def select_sheets(label_text):
     root.mainloop()
 
     return(selection)
+
 
 
 # ==========================================================
@@ -226,7 +273,7 @@ def load_grid_exchange(trafo_sheets):
 # ==========================================================
 # EV demand LKW
 # ==========================================================
-def generate_lkw_profile(file_path=None, year=config.year):
+def generate_lkw_profile(file_path=None, year=None, sheet_name=None):
     """
     Generate full-year charging profile for 2025 in 15-minute intervall from single example day data.
 
@@ -240,9 +287,17 @@ def generate_lkw_profile(file_path=None, year=config.year):
     if file_path is None:
         file_path = get_input_file_path()
 
+    if year is None:
+        print("no year detected for charging profile generation")
+        return
+    
+    if sheet_name is None:
+        print("no worksheet selected for charging profile generation")
+        return
+
     df = pd.read_excel(
         file_path,
-        sheet_name="Zubau_LKW_Aug2025",
+        sheet_name=sheet_name,
         header=1
     )
 
@@ -299,7 +354,7 @@ def generate_lkw_profile(file_path=None, year=config.year):
 # ==========================================================
 # EV demand Zustellung
 # ==========================================================
-def generate_zustellung_profile(file_path=None, year=2026):
+def generate_zustellung_profile(file_path=None, year=None, sheet_name=None):
     """
     Generate full-year 15-min Zustellung load profile.
 
@@ -313,9 +368,17 @@ def generate_zustellung_profile(file_path=None, year=2026):
     if file_path is None:
         file_path = get_input_file_path()
 
+    if year is None:
+        print("no year detected for delivery profile generation")
+        return
+    
+    if sheet_name is None:
+        print("no worksheet selected for delivery profile generation")
+        return
+
     df = pd.read_excel(
         file_path,
-        sheet_name="Zubau_Zustellung_Oct2026",
+        sheet_name=sheet_name,
         header=0
     )
 
@@ -410,3 +473,51 @@ def generate_zustellung_profile(file_path=None, year=2026):
 
     return result
 
+
+
+# ==========================================================
+# config helpers
+# ==========================================================
+def load_config(path: str = "config.json") -> dict:
+	p = Path(path)
+	if not p.exists():
+		raise FileNotFoundError(f"config.json not found under: {p.resolve()}")
+
+	with p.open("r", encoding="utf-8") as f:
+		cfg = json.load(f)
+
+	return cfg
+
+
+def print_config(cfg: dict) -> None:
+	def g(d, *keys, default=None):
+		for k in keys:
+			if not isinstance(d, dict) or k not in d:
+				return default
+			d = d[k]
+		return d
+
+	print("\n===== CONFIG =====")
+	print(f"use_case: {g(cfg, 'run', 'use_case')}")
+	print(f"timestep_minutes: {g(cfg, 'run', 'timestep_minutes')}")
+	print(f"horizon_days: {g(cfg, 'run', 'horizon_days')}")
+	print(f"solver: {g(cfg, 'run', 'solver')}")
+
+	print(f"discount_rate: {g(cfg, 'economics', 'discount_rate')}")
+	print(f"lifetime_years: {g(cfg, 'economics', 'lifetime_years')}")
+	print(f"capex_chf_per_kwh: {g(cfg, 'economics', 'capex_chf_per_kwh')}")
+
+	print(f"battery.max_capacity_kwh: {g(cfg, 'battery', 'max_capacity_kwh')}")
+	print(f"battery.max_inflow_kw: {g(cfg, 'battery', 'max_inflow_kw')}")
+	print(f"battery.max_outflow_kw: {g(cfg, 'battery', 'max_outflow_kw')}")
+	print(f"battery.eta_charge: {g(cfg, 'battery', 'eta_charge')}")
+	print(f"battery.eta_discharge: {g(cfg, 'battery', 'eta_discharge')}")
+	print(f"battery.eta_self_discharge_per_step: {g(cfg, 'battery', 'eta_self_discharge_per_step')}")
+	print(f"battery.max_c_rate: {g(cfg, 'battery', 'max_c_rate')}")
+	print(f"battery.dod_max: {g(cfg, 'battery', 'dod_max')}")
+
+	print(f"excel_path: {g(cfg, 'inputs', 'excel_path')}")
+	print(f"load_sheet: {g(cfg, 'inputs', 'load_sheet')}")
+	print(f"pv_sheet: {g(cfg, 'inputs', 'pv_sheet')}")
+	print(f"tariff_sheet: {g(cfg, 'inputs', 'tariff_sheet')}")
+	print("==================\n")

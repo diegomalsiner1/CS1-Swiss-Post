@@ -4,19 +4,16 @@ from functools import reduce
 import json
 from datetime import datetime
 from pathlib import Path
+import data_preprocessing as dpp
+import config
 import time
 import optimization as opt
-import data_preprocessing as dpp
 import results_processing as rp
-import config
 
 ## Will be used to run the tool
-
-
 INPUT_DICT_PATH = Path("03-PROCESSED-DATA/input_dict.json")
 RESULTS_ROOT = Path("02-MODEL-RESULTS")
 DEBUG_INFEASIBILITY = False
-
 
 def create_run_output_dir(input_dict: dict) -> Path:
     mode = input_dict.get("parameters", {}).get("optimization_mode", "unknown")
@@ -101,6 +98,7 @@ def build_input_dict_from_raw_data() -> dict:
     # Extract trafo data
     trafo_sheets = dpp.select_sheets("Select sheets with trafo data:")
     trafo_df = dpp.load_grid_exchange(trafo_sheets)
+    year = trafo_df["timestamp"].dt.year.iloc[0]
     dfs.append(trafo_df)
 
     # PV data (or just trafo2?)
@@ -110,8 +108,10 @@ def build_input_dict_from_raw_data() -> dict:
     dfs.append(pv_df)
 
     # EV data
-    lkw = dpp.generate_lkw_profile(year=2025)
-    zustellung = dpp.generate_zustellung_profile(year=2025)
+    ev_ChargingSheet = dpp.select_sheets("Select the EV charging sheet")
+    dist_sheet = dpp.select_sheets("Select the sheet with the distribution profile")
+    lkw = dpp.generate_lkw_profile(year=year, sheet_name=ev_ChargingSheet[0])
+    zustellung = dpp.generate_zustellung_profile(year=year, sheet_name=dist_sheet[0])
     ev_total = lkw.merge(zustellung, on="timestamp", how="outer")
     dfs.append(ev_total)
 
