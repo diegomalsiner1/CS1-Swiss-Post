@@ -8,7 +8,7 @@ interest_rate = 0.06 # [-]
 lifetime = 20 # [years]
 year =  2025 # 
 
-load_existing_input_dict = True # [True or False]
+load_existing_input_dict = False # [True or False]
 max_timesteps = 40000 # [None or int] Limit optimization horizon for faster/debug runs
 optimization_mode = "lp" # ["milp" or "lp"]
 
@@ -23,6 +23,9 @@ invest_cost = 450 # [CHF/kWh]
 operation_and_maintenance = 10000 * (
     max_timesteps / (24 * 4 * 365) if max_timesteps is not None else 1) 
 battery_degrading = 0.01 # [% per year]
+
+peak_shaving_cost_factor = 10.0 # [CHF/kW] Cost factor for peak shaving, higher means more aggressive shaving
+peak_shaving_granularity = "yearly" ## either "yearly" or "monthly
 
 def load_config(path: str = "config.json") -> dict:
 	p = Path(path)
@@ -66,4 +69,7 @@ def print_config(cfg: dict) -> None:
 	print(f"load_sheet: {g(cfg, 'inputs', 'load_sheet')}")
 	print(f"pv_sheet: {g(cfg, 'inputs', 'pv_sheet')}")
 	print(f"tariff_sheet: {g(cfg, 'inputs', 'tariff_sheet')}")
+
+	print(f"peak_shaving_cost_factor: {g(cfg, 'peak_shaving', 'cost_factor')}")
+	print(f"peak_shaving_granularity: {g(cfg, 'peak_shaving', 'granularity')}")
 	print("==================\n")

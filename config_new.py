@@ -16,7 +16,7 @@ def _default_parameters() -> dict:
         "interest_rate": 0.06,
         "lifetime": 20,
         "year": 2025,
-        "load_existing_input_dict": True,
+        "load_existing_input_dict": False,
         "max_timesteps": max_steps,
         "optimization_mode": "lp",
         "PV_max_capacity": 10000,
@@ -29,6 +29,8 @@ def _default_parameters() -> dict:
         "invest_cost": 450.0,
         "operation_and_maintenance": 10000 * (max_steps / (24 * 4 * 365)),
         "battery_degrading": 0.01,
+        "peak_shaving_cost_factor": 10.0,
+        "peak_shaving_granularity": "monthly", ## either "yearly" or "monthly"
     }
 
 
@@ -168,3 +170,5 @@ eta_self_discharge = _cfg["eta_self_discharge"]
 invest_cost = _cfg["invest_cost"]
 operation_and_maintenance = _cfg["operation_and_maintenance"]
 battery_degrading = _cfg["battery_degrading"]
+peak_shaving_cost_factor = _cfg["peak_shaving_cost_factor"]
+peak_shaving_granularity = _cfg["peak_shaving_granularity"]

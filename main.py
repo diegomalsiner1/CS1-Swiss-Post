@@ -46,6 +46,7 @@ def save_run_artifacts(run_dir: Path, input_dict: dict, solution_summary: dict, 
         "import_cost": float(solution_summary["import_cost"]),
         "fixed_om_cost": float(solution_summary["fixed_om_cost"]),
         "annualized_battery_cost": float(solution_summary["annualized_battery_cost"]),
+        "peak_demand_cost": float(solution_summary.get("peak_demand_cost", 0.0)),
         "no_battery_import_cost": float(solution_summary.get("no_battery_import_cost", 0.0)),
         "no_battery_total_cost": float(solution_summary.get("no_battery_total_cost", 0.0)),
         "npv": float(solution_summary.get("npv", np.nan)),
@@ -151,6 +152,8 @@ def build_input_dict_from_raw_data() -> dict:
             "lifetime": config.lifetime,
             "battery_degrading": config.battery_degrading,
             "optimization_mode": config.optimization_mode,
+            "peak_shaving_cost_factor": config.peak_shaving_cost_factor,
+            "peak_shaving_granularity": config.peak_shaving_granularity,
         },
         "timestamps": merged_df["timestamp"].astype(str).tolist(),
         "total_demand": merged_df["total_demand"].tolist(),
@@ -194,7 +197,7 @@ run_start = time.perf_counter()
 
 # Run optimization
 model, slacks, solution_handles = opt.setup(input_dict, debug_infeasibility=DEBUG_INFEASIBILITY)
-model = opt.optimize_model(model, slacks=slacks if DEBUG_INFEASIBILITY else None)
+model = opt.optimize_model(model, slacks=slacks if DEBUG_INFEASIBILITY else None, debug_infeasibility=DEBUG_INFEASIBILITY)
 solution_summary = opt.summarize_solution(model, solution_handles)
 run_seconds = time.perf_counter() - run_start
 baseline_summary = opt.compute_no_battery_baseline(input_dict)
