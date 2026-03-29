@@ -56,6 +56,8 @@ def clean_value(v):
             return True
         if v.lower() == "false":
             return False
+        if v.lower() == "none":
+            return None
 
         try:
             if "." in v:
