@@ -36,10 +36,15 @@ def write_config_py(config, filename="config.py"):
 
         for key, value in config.items():
 
+            # handle NaN (float)
+            if isinstance(value, float) and math.isnan(value):
+                f.write(f"{key} = None\n")
+
             # format strings properly
-            if isinstance(value, str):
+            elif isinstance(value, str):
                 f.write(f'{key} = "{value}"\n')
 
+            # everything else (numbers, booleans)
             else:
                 f.write(f"{key} = {value}\n")
 

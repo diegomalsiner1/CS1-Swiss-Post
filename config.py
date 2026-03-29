@@ -15,4 +15,4 @@ eta_discharge = 0.95
 eta_self_discharge = 0
 invest_cost = 450
 battery_degrading = 0.01
-operation_and_maintenance = 11415.52511415525
+operation_and_maintenance = None
