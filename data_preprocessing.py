@@ -28,16 +28,23 @@ def get_input_file_path():
 # ==========================================================
 # config reading and generation
 # ==========================================================
+import math
+
 def write_config_py(config, filename="config.py"):
     with open(filename, "w", encoding="utf-8") as f:
         f.write("# Auto-generated from Excel - DO NOT EDIT MANUALLY\n\n")
 
         for key, value in config.items():
 
+            # handle NaN (float)
+            if isinstance(value, float) and math.isnan(value):
+                f.write(f"{key} = None\n")
+
             # format strings properly
-            if isinstance(value, str):
+            elif isinstance(value, str):
                 f.write(f'{key} = "{value}"\n')
 
+            # everything else (numbers, booleans)
             else:
                 f.write(f"{key} = {value}\n")
 
