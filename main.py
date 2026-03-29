@@ -153,7 +153,7 @@ def build_input_dict_from_raw_data() -> dict:
             "battery_degrading": config.battery_degrading,
             "optimization_mode": config.optimization_mode,
             "peak_shaving_cost_factor": config.peak_shaving_cost_factor,
-            "peak_shaving_granularity": config.peak_shaving_granularity,
+            "peak_shaving_frequency": config.peak_shaving_frequency,
         },
         "timestamps": merged_df["timestamp"].astype(str).tolist(),
         "total_demand": merged_df["total_demand"].tolist(),
@@ -226,6 +226,13 @@ print("Battery Capacity [kWh]", solution_summary["battery_capacity_kwh"])
 print("OPEX", solution_summary["opex"])
 print("Import Cost", solution_summary["import_cost"])
 print("Fixed O&M Cost", solution_summary["fixed_om_cost"])
+peak_type = input_dict["parameters"].get("peak_shaving_granularity", input_dict["parameters"].get("peak_shaving_frequency", "yearly"))
+print("Peak Demand Type and Cost", peak_type, solution_summary["peak_demand_cost"])
+if solution_summary.get("yearly_peak") is not None:
+    print("Yearly Peak", solution_summary["yearly_peak"])
+if solution_summary.get("monthly_peaks"):
+    print("Monthly Peaks", solution_summary["monthly_peaks"])
+    print("Sum Monthly Peaks", solution_summary["sum_monthly_peaks"])
 print("Annualized Battery Cost", solution_summary["annualized_battery_cost"])
 print("Runtime [s]", run_seconds)
 print("Saved run artifacts to", run_dir)

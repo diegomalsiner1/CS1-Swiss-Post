@@ -28,6 +28,8 @@ def get_input_file_path():
 # ==========================================================
 # config reading and generation
 # ==========================================================
+import math
+
 def write_config_py(config, filename="config.py"):
     with open(filename, "w", encoding="utf-8") as f:
         f.write("# Auto-generated from Excel - DO NOT EDIT MANUALLY\n\n")
