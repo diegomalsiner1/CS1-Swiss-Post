@@ -177,8 +177,8 @@ def setup(input_dict: dict, debug_infeasibility: bool = False):
             })
             df_temp["year_month"] = df_temp["timestamp"].dt.to_period("M")
             unique_months = df_temp["year_month"].unique()
-            print(f"Number of unique months: {len(unique_months)}")
-            print(f"Unique months: {list(unique_months)}")
+            #print(f"Number of unique months: {len(unique_months)}")
+            #print(f"Unique months: {list(unique_months)}")
             
             for month in unique_months:
                 month_indices = [i for i, m in enumerate(df_temp["year_month"]) if m == month]

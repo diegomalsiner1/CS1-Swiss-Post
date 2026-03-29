@@ -58,7 +58,14 @@ def export_results(run_dir, solution_summary, battery_soc, timestamps=None, inpu
         financial_results["annual_financials_df"].to_csv(run_dir / "financial_cashflows.csv", index=False)
 
     # 2. Save KPI Summary to JSON
-    clean_summary = {k: v for k, v in solution_summary.items() if isinstance(v, (int, float, str, list, dict))}
+    clean_summary = {
+        k: (
+            {str(sub_k): sub_v for sub_k, sub_v in v.items()}
+            if isinstance(v, dict) else v
+        )
+        for k, v in solution_summary.items()
+        if isinstance(v, (int, float, str, list, dict))
+    }
     with open(run_dir / "results_summary.json", "w") as f:
         json.dump(clean_summary, f, indent=4)
 

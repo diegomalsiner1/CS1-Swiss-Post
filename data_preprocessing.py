@@ -74,7 +74,7 @@ config_dict = {
 }
 max_timesteps = config_dict.get("max_timesteps")
 config_dict["operation_and_maintenance"] = 10000 * (
-    max_timesteps / (24 * 4 * 365) if max_timesteps is not None else 1
+    max_timesteps / (24 * 4 * 365) if not np.isnan(max_timesteps) else 1 ## "nan" instead of None
 )
 write_config_py(config_dict)
 
