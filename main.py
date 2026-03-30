@@ -43,11 +43,13 @@ def save_run_artifacts(run_dir: Path, input_dict: dict, solution_summary: dict, 
         "import_cost": float(solution_summary["import_cost"]),
         "fixed_om_cost": float(solution_summary["fixed_om_cost"]),
         "annualized_battery_cost": float(solution_summary["annualized_battery_cost"]),
+        "peak_demand_cost": float(solution_summary.get("peak_demand_cost", 0.0)),
         "no_battery_import_cost": float(solution_summary.get("no_battery_import_cost", 0.0)),
         "no_battery_total_cost": float(solution_summary.get("no_battery_total_cost", 0.0)),
         "npv": float(solution_summary.get("npv", np.nan)),
         "irr": float(solution_summary.get("irr", np.nan)),
         "payback_years": float(solution_summary.get("payback_years", np.nan)),
+        "discounted_payback_years": float(solution_summary.get("discounted_payback_years", np.nan)),
     }
 
     (run_dir / "settings_snapshot.json").write_text(
@@ -151,6 +153,8 @@ def build_input_dict_from_raw_data() -> dict:
             "lifetime": config.lifetime,
             "battery_degrading": config.battery_degrading,
             "optimization_mode": config.optimization_mode,
+            "peak_shaving_cost_factor": config.peak_shaving_cost_factor,
+            "peak_shaving_frequency": config.peak_shaving_frequency,
         },
         "timestamps": merged_df["timestamp"].astype(str).tolist(),
         "total_demand": merged_df["total_demand"].tolist(),
@@ -188,13 +192,97 @@ def load_or_build_input_dict() -> dict:
     return input_dict
 
 
+def run_battery_size_sensitivity(input_dict: dict, battery_sizes_kwh) -> pd.DataFrame:
+    rows = []
+    baseline_summary = opt.compute_no_battery_baseline(input_dict)
+    invest_cost_per_kwh = float(input_dict["parameters"].get("Battery_invest_cost", 0.0))
+
+    for battery_size_kwh in battery_sizes_kwh:
+        print(f"Running sensitivity case for fixed battery size = {battery_size_kwh} kWh")
+        if float(battery_size_kwh) == 0.0:
+            solution_summary = {
+                "battery_capacity_kwh": 0.0,
+                "objective_total_cost": float(baseline_summary["no_battery_total_cost"]),
+                "opex": float(baseline_summary["no_battery_total_cost"]),
+                "import_cost": float(baseline_summary["no_battery_import_cost"]),
+                "fixed_om_cost": float(input_dict["parameters"].get("operation_and_maintenance", 0.0)),
+                "annualized_battery_cost": 0.0,
+                **baseline_summary,
+            }
+            rows.append(
+                {
+                    "battery_size_kwh": 0.0,
+                    "optimized_battery_capacity_kwh": 0.0,
+                    "objective_total_cost": float(solution_summary["objective_total_cost"]),
+                    "import_cost": float(solution_summary["import_cost"]),
+                    "annualized_battery_cost": 0.0,
+                    "annual_savings": 0.0,
+                    "npv": 0.0,
+                    "payback_years": np.nan,
+                    "discounted_payback_years": np.nan,
+                    "status": "baseline",
+                }
+            )
+            continue
+
+        try:
+            model, slacks, solution_handles = opt.setup(
+                input_dict,
+                debug_infeasibility=DEBUG_INFEASIBILITY,
+                fixed_battery_capacity_kwh=float(battery_size_kwh),
+            )
+            model = opt.optimize_model(
+                model,
+                slacks=slacks if DEBUG_INFEASIBILITY else None,
+                debug_infeasibility=DEBUG_INFEASIBILITY,
+            )
+            solution_summary = opt.summarize_solution(model, solution_handles)
+            solution_summary.update(baseline_summary)
+            financial_summary = rp.compute_financial_summary(input_dict, solution_summary)
+            status = "optimal"
+        except ValueError as exc:
+            print(f"Sensitivity case {battery_size_kwh} kWh is infeasible: {exc}")
+            rows.append(
+                {
+                    "battery_size_kwh": float(battery_size_kwh),
+                    "optimized_battery_capacity_kwh": float(battery_size_kwh),
+                    "objective_total_cost": np.nan,
+                    "import_cost": np.nan,
+                    "annualized_battery_cost": float(battery_size_kwh) * invest_cost_per_kwh,
+                    "annual_savings": np.nan,
+                    "npv": np.nan,
+                    "payback_years": np.nan,
+                    "discounted_payback_years": np.nan,
+                    "status": "infeasible",
+                }
+            )
+            continue
+
+        rows.append(
+            {
+                "battery_size_kwh": float(battery_size_kwh),
+                "optimized_battery_capacity_kwh": float(solution_summary["battery_capacity_kwh"]),
+                "objective_total_cost": float(solution_summary["objective_total_cost"]),
+                "import_cost": float(solution_summary["import_cost"]),
+                "annualized_battery_cost": float(solution_summary["annualized_battery_cost"]),
+                "annual_savings": float(financial_summary["annual_savings"]),
+                "npv": float(financial_summary["npv"]),
+                "payback_years": float(financial_summary["payback_years"]),
+                "discounted_payback_years": float(financial_summary["discounted_payback_years"]),
+                "status": status,
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
 input_dict = load_or_build_input_dict()
 run_dir = create_run_output_dir(input_dict)
 run_start = time.perf_counter()
 
 # Run optimization
 model, slacks, solution_handles = opt.setup(input_dict, debug_infeasibility=DEBUG_INFEASIBILITY)
-model = opt.optimize_model(model, slacks=slacks if DEBUG_INFEASIBILITY else None)
+model = opt.optimize_model(model, slacks=slacks if DEBUG_INFEASIBILITY else None, debug_infeasibility=DEBUG_INFEASIBILITY)
 solution_summary = opt.summarize_solution(model, solution_handles)
 run_seconds = time.perf_counter() - run_start
 baseline_summary = opt.compute_no_battery_baseline(input_dict)
@@ -202,6 +290,8 @@ solution_summary.update(baseline_summary)
 save_run_artifacts(run_dir, input_dict, solution_summary, run_seconds)
 
 battery_soc = [v.solution_value() for v in solution_handles["battery_level_vars"]]
+battery_charge_power = [v.solution_value() for v in solution_handles["battery_in_flow_vars"]]
+battery_discharge_power = [v.solution_value() for v in solution_handles["battery_out_flow_vars"]]
 pv_flow = [v.solution_value() for v in solution_handles["pv_out_flow_vars"]]
 grid_flow = [v.solution_value() for v in solution_handles["grid_flow_vars"]]
 total_load = input_dict.get("total_demand", [])
@@ -215,7 +305,16 @@ rp.export_results(
     pv_flow=pv_flow,
     grid_flow=grid_flow,
     total_load=total_load,
+    battery_charge_power=battery_charge_power,
+    battery_discharge_power=battery_discharge_power,
 )
+
+run_battery_size_sensitivity_flag = getattr(config, "run_battery_size_sensitivity", False)
+battery_sensitivity_sizes_kwh = getattr(config, "battery_sensitivity_sizes_kwh", [])
+if run_battery_size_sensitivity_flag and battery_sensitivity_sizes_kwh:
+    sensitivity_df = run_battery_size_sensitivity(input_dict, battery_sensitivity_sizes_kwh)
+    sensitivity_df.to_csv(run_dir / "battery_size_sensitivity.csv", index=False)
+    print("Saved battery size sensitivity to", run_dir / "battery_size_sensitivity.csv")
 
 print("Optimization finished")
 print("Objective Total Cost", solution_summary["objective_total_cost"])
@@ -223,6 +322,13 @@ print("Battery Capacity [kWh]", solution_summary["battery_capacity_kwh"])
 print("OPEX", solution_summary["opex"])
 print("Import Cost", solution_summary["import_cost"])
 print("Fixed O&M Cost", solution_summary["fixed_om_cost"])
+peak_type = input_dict["parameters"].get("peak_shaving_granularity", input_dict["parameters"].get("peak_shaving_frequency", "yearly"))
+print("Peak Demand Type and Cost", peak_type, solution_summary["peak_demand_cost"])
+if solution_summary.get("yearly_peak") is not None:
+    print("Yearly Peak", solution_summary["yearly_peak"])
+if solution_summary.get("monthly_peaks"):
+    print("Monthly Peaks", solution_summary["monthly_peaks"])
+    print("Sum Monthly Peaks", solution_summary["sum_monthly_peaks"])
 print("Annualized Battery Cost", solution_summary["annualized_battery_cost"])
 print("Runtime [s]", run_seconds)
 print("Saved run artifacts to", run_dir)

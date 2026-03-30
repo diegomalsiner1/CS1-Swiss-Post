@@ -1,4 +1,3 @@
-import numpy as np
 from ortools.linear_solver import pywraplp
 import pandas as pd
 from tqdm import tqdm
@@ -6,30 +5,32 @@ from tqdm import tqdm
 ## Will be used to define the optimization variables, constraints, and the objective function
 
 
-def setup(input_dict, debug_infeasibility=False):
+def setup(input_dict: dict, debug_infeasibility: bool = False):
+    """Creates and returns an OR-Tools optimization model and handles.
+
+    Parameters:
+      input_dict: problem data including time series and parameters
+      debug_infeasibility: if True, add slack variables to diagnose infeasibility.
+
+    Returns:
+      model, slacks_list, solution_handles
     """
-    Method for setting up the optimization problem
 
-    Input: 
-    Dict input_dict
-
-    Output:
-    ortools.linear_solver.pywraplp.solver optimization model
-    """
-    # Creating an optimization model/solver
-    print(f"Setting up optimization problem")
-    model = pywraplp.Solver.CreateSolver("CBC") # milp solver
-    if model is None:
-        raise RuntimeError("Could not create CBC solver.")
-
-    model = pywraplp.Solver.CreateSolver("CBC")
+    print("Setting up optimization problem")
+    model = pywraplp.Solver.CreateSolver("CBC")  # MILP solver
     if model is None:
         raise RuntimeError(
             "Could not create CBC solver. Check OR-Tools installation and CBC backend availability."
         )
 
+    # Basic input consistency checks
+    if "total_demand" not in input_dict or "PV_capacity_factor" not in input_dict or "electricity_price" not in input_dict:
+        raise ValueError("input_dict must contain total_demand, PV_capacity_factor, and electricity_price time series")
+    n = len(input_dict["total_demand"])
+    if not (len(input_dict["PV_capacity_factor"]) == n and len(input_dict["electricity_price"]) == n):
+        raise ValueError("Time series lengths in input_dict must match")
+
     ## Defining the required constants
-    ## to be added
     PV_max_capacity = input_dict["parameters"]["PV_max_capacity"]
     Battery_max_inflow = input_dict["parameters"]["Battery_max_inflow"]
     Battery_max_outflow = input_dict["parameters"]["Battery_max_outflow"]
@@ -43,6 +44,10 @@ def setup(input_dict, debug_infeasibility=False):
     interest_rate = input_dict["parameters"]["interest_rate"]
     lifetime = input_dict["parameters"]["lifetime"]
     battery_degrading = input_dict["parameters"]["battery_degrading"]
+    peak_shaving_cost_factor = input_dict["parameters"].get("peak_shaving_cost_factor", 0.0)
+    peak_shaving_frequency = input_dict["parameters"].get("peak_shaving_granularity", input_dict["parameters"].get("peak_shaving_frequency", "yearly")).lower()
+    if peak_shaving_frequency not in {"yearly", "monthly"}:
+        raise ValueError("peak_shaving_granularity must be 'yearly' or 'monthly'")
     optimization_mode = input_dict["parameters"].get("optimization_mode", "milp").lower()
     if optimization_mode not in {"milp", "lp"}:
         raise ValueError("optimization_mode must be 'milp' or 'lp'")
@@ -62,6 +67,10 @@ def setup(input_dict, debug_infeasibility=False):
     OPEX = model.NumVar(-inf, inf, f"Operational_Cost")
     Total_Cost = model.NumVar(-inf, inf, "Total_Cost")
     Battery_capacity = model.NumVar(0, Battery_capacity_upper_bound, "Battery_Capacity")
+    
+    # Peak demand variables for grid flow
+    Peak_grid_flow = model.NumVar(0, inf, "Peak_Grid_Flow_Yearly") if peak_shaving_frequency == "yearly" else None
+    
     slacks = []
     print("Initializing time dependent variables")
     battery_level_vars = []
@@ -153,6 +162,31 @@ def setup(input_dict, debug_infeasibility=False):
         model.Add(Time_dependent_variables[("Battery_level", 0)] == 0.5 * Battery_capacity)
         model.Add(Time_dependent_variables[("Battery_level", timesteps[-1])] == 0.5 * Battery_capacity)
 
+    # Peak grid flow constraints
+    monthly_peak_vars = {}
+    if peak_shaving_cost_factor > 0:
+        if peak_shaving_frequency == "yearly":
+            # Peak grid flow for the entire year
+            for t in timesteps:
+                model.Add(Peak_grid_flow >= Time_dependent_variables[("Grid_flow", t)])
+        else:  # monthly
+            # Create peak variables for each month
+            timestamps = pd.to_datetime(input_dict["timestamps"])
+            df_temp = pd.DataFrame({
+                "timestamp": timestamps,
+            })
+            df_temp["year_month"] = df_temp["timestamp"].dt.to_period("M")
+            unique_months = df_temp["year_month"].unique()
+            #print(f"Number of unique months: {len(unique_months)}")
+            #print(f"Unique months: {list(unique_months)}")
+            
+            for month in unique_months:
+                month_indices = [i for i, m in enumerate(df_temp["year_month"]) if m == month]
+                peak_var = model.NumVar(0, inf, f"Peak_Grid_Flow_{month}")
+                monthly_peak_vars[month] = peak_var
+                for idx in month_indices:
+                    model.Add(peak_var >= Time_dependent_variables[("Grid_flow", idx)])
+
     timestep_hours = 0.25
     import_cost_expr = sum(
         Time_dependent_variables[("Grid_flow", t)] * input_dict["electricity_price"][t] * timestep_hours
@@ -160,13 +194,21 @@ def setup(input_dict, debug_infeasibility=False):
     )
     annualized_battery_cost_expr = CRF * battery_invest_cost * Battery_capacity
 
+    # Calculate peak demand costs based on frequency
+    peak_demand_cost_expr = 0
+    if peak_shaving_cost_factor > 0:
+        if peak_shaving_frequency == "yearly":
+            peak_demand_cost_expr = peak_shaving_cost_factor * Peak_grid_flow
+        else:  # monthly
+            peak_demand_cost_expr = peak_shaving_cost_factor * sum(monthly_peak_vars.values())
+
     # Objective function
     if debug_infeasibility:
         model.Minimize(sum(slacks))
     else:
         opex_expr = cost_operation_and_maintenance + import_cost_expr
         model.Add(OPEX == opex_expr)
-        model.Add(Total_Cost == annualized_battery_cost_expr + OPEX)
+        model.Add(Total_Cost == annualized_battery_cost_expr + OPEX + peak_demand_cost_expr)
         model.Minimize(Total_Cost)
 
     solution_handles = {
@@ -176,17 +218,20 @@ def setup(input_dict, debug_infeasibility=False):
         "annualized_battery_cost_expr": annualized_battery_cost_expr,
         "import_cost_expr": import_cost_expr,
         "fixed_om_cost": cost_operation_and_maintenance,
+        "peak_demand_cost_expr": peak_demand_cost_expr,
         "battery_level_vars": battery_level_vars,
         "battery_in_flow_vars": battery_in_flow_vars,
         "battery_out_flow_vars": battery_out_flow_vars,
         "grid_flow_vars": grid_flow_vars,
         "pv_out_flow_vars": pv_out_flow_vars,
+        "yearly_peak_var": Peak_grid_flow,
+        "monthly_peak_vars": monthly_peak_vars,
     }
 
     return model, slacks, solution_handles
 
 
-def optimize_model(model, slacks=None, top_n=20):
+def optimize_model(model, slacks=None, top_n=20, debug_infeasibility=False):
     """
     Method for optimizing the a constrainted model
     Input:
@@ -196,7 +241,8 @@ def optimize_model(model, slacks=None, top_n=20):
     ortools.linear_solver.pywraplp.solver solved optimization model
     """
     print("Running optimization")
-    model.EnableOutput()  # Enable solver output for debugging
+    if debug_infeasibility:
+        model.EnableOutput()  # Enable solver output for debugging during infeasibility checks
     status = model.Solve()
 
     if status == model.OPTIMAL:
@@ -214,6 +260,9 @@ def optimize_model(model, slacks=None, top_n=20):
 
 
 def summarize_solution(model, solution_handles):
+    yearly_peak = solution_handles["yearly_peak_var"].solution_value() if solution_handles["yearly_peak_var"] else None
+    monthly_peaks = {k: v.solution_value() for k, v in solution_handles["monthly_peak_vars"].items()}
+    sum_monthly = sum(monthly_peaks.values()) if monthly_peaks else 0
     return {
         "battery_capacity_kwh": solution_handles["battery_capacity"].solution_value(),
         "objective_total_cost": model.Objective().Value(),
@@ -221,6 +270,10 @@ def summarize_solution(model, solution_handles):
         "import_cost": solution_handles["import_cost_expr"].solution_value(),
         "fixed_om_cost": solution_handles["fixed_om_cost"],
         "annualized_battery_cost": solution_handles["annualized_battery_cost_expr"].solution_value(),
+        "peak_demand_cost": solution_handles["peak_demand_cost_expr"].solution_value(),
+        "yearly_peak": yearly_peak,
+        "monthly_peaks": monthly_peaks,
+        "sum_monthly_peaks": sum_monthly,
     }
 
 

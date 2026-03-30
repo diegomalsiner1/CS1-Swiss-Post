@@ -4,3 +4,4 @@ venv/
 __pycache__/
 02-MODEL-RESULTS/*
 !02-MODEL-RESULTS/.gitkeep
+01-INPUT-DATA/.DS_Store
