@@ -5,7 +5,11 @@ from tqdm import tqdm
 ## Will be used to define the optimization variables, constraints, and the objective function
 
 
-def setup(input_dict: dict, debug_infeasibility: bool = False):
+def setup(
+    input_dict: dict,
+    debug_infeasibility: bool = False,
+    fixed_battery_capacity_kwh: float | None = None,
+):
     """Creates and returns an OR-Tools optimization model and handles.
 
     Parameters:
@@ -51,9 +55,23 @@ def setup(input_dict: dict, debug_infeasibility: bool = False):
     optimization_mode = input_dict["parameters"].get("optimization_mode", "milp").lower()
     if optimization_mode not in {"milp", "lp"}:
         raise ValueError("optimization_mode must be 'milp' or 'lp'")
+    surplus_handling = input_dict["parameters"].get("surplus_handling", "curtail").lower()
+    if surplus_handling not in {"curtail", "must_absorb"}:
+        raise ValueError("surplus_handling must be 'curtail' or 'must_absorb'")
+    battery_max_c_rate = input_dict["parameters"].get("battery_max_c_rate")
+    if battery_max_c_rate is not None:
+        battery_max_c_rate = float(battery_max_c_rate)
+        if battery_max_c_rate <= 0:
+            raise ValueError("battery_max_c_rate must be positive when provided")
+    min_soc_fraction = float(input_dict["parameters"].get("battery_min_soc_fraction", 0.0))
+    if not 0 <= min_soc_fraction < 1:
+        raise ValueError("battery_min_soc_fraction must lie in [0, 1)")
     use_binaries = optimization_mode == "milp"
 
-    CRF = (((1+interest_rate)**lifetime) * interest_rate) / ((1+interest_rate)**lifetime - 1)
+    if interest_rate == 0:
+        CRF = 1 / lifetime
+    else:
+        CRF = (((1 + interest_rate) ** lifetime) * interest_rate) / (((1 + interest_rate) ** lifetime) - 1)
 
     ## Defining the timeseries of PV production, energy demand, and electricity prices
 
@@ -66,7 +84,17 @@ def setup(input_dict: dict, debug_infeasibility: bool = False):
     inf = model.infinity()
     OPEX = model.NumVar(-inf, inf, f"Operational_Cost")
     Total_Cost = model.NumVar(-inf, inf, "Total_Cost")
-    Battery_capacity = model.NumVar(0, Battery_capacity_upper_bound, "Battery_Capacity")
+    if fixed_battery_capacity_kwh is not None:
+        fixed_battery_capacity_kwh = float(fixed_battery_capacity_kwh)
+        if fixed_battery_capacity_kwh < 0 or fixed_battery_capacity_kwh > Battery_capacity_upper_bound:
+            raise ValueError("fixed_battery_capacity_kwh must lie within [0, Battery_max_capacity]")
+        Battery_capacity = model.NumVar(
+            fixed_battery_capacity_kwh,
+            fixed_battery_capacity_kwh,
+            "Battery_Capacity",
+        )
+    else:
+        Battery_capacity = model.NumVar(0, Battery_capacity_upper_bound, "Battery_Capacity")
     
     # Peak demand variables for grid flow
     Peak_grid_flow = model.NumVar(0, inf, "Peak_Grid_Flow_Yearly") if peak_shaving_frequency == "yearly" else None
@@ -78,6 +106,7 @@ def setup(input_dict: dict, debug_infeasibility: bool = False):
     battery_out_flow_vars = []
     grid_flow_vars = []
     pv_out_flow_vars = []
+    spill_flow_vars = []
 
     for t in tqdm(timesteps):
         # Integer Variables
@@ -86,12 +115,14 @@ def setup(input_dict: dict, debug_infeasibility: bool = False):
         Time_dependent_variables[("Grid_flow",t)] = model.NumVar(0, inf, f"Powerflow_Grid_{t}")
         Time_dependent_variables[("Battery_level",t)] = model.NumVar(0, Battery_capacity_upper_bound, f"Battery_Level_{t}")
         Time_dependent_variables[("PV_out_flow",t)] = model.NumVar(0, PV_max_capacity, f"PV_Powerflow_out_{t}")
+        Time_dependent_variables[("Spill_flow",t)] = model.NumVar(0, PV_max_capacity, f"Powerflow_Spill_{t}")
 
         battery_in_flow_vars.append(Time_dependent_variables[("Battery_in_flow", t)])
         battery_out_flow_vars.append(Time_dependent_variables[("Battery_out_flow", t)])
         battery_level_vars.append(Time_dependent_variables[("Battery_level", t)])
         grid_flow_vars.append(Time_dependent_variables[("Grid_flow", t)])
         pv_out_flow_vars.append(Time_dependent_variables[("PV_out_flow", t)])
+        spill_flow_vars.append(Time_dependent_variables[("Spill_flow", t)])
 
         if use_binaries:
             Time_dependent_variables[("Binary_battery_in_flow",t)] = model.BoolVar(f"Binary_battery_in_flow_{t}")
@@ -117,21 +148,36 @@ def setup(input_dict: dict, debug_infeasibility: bool = False):
         else:
             model.Add(power_balance_expr == demand_t)
 
-        # PV Power Output
+        # PV allocation between local use and curtailment/spillage
         pv_limit_t = input_dict["PV_capacity_factor"][t] * PV_max_capacity
         if debug_infeasibility:
-            s_pv = model.NumVar(0, inf, f"slack_pv_limit_{t}")
-            model.Add(Time_dependent_variables[("PV_out_flow", t)] <= pv_limit_t + s_pv)
+            s_pv = model.NumVar(0, inf, f"slack_pv_balance_{t}")
+            pv_balance_expr = (
+                Time_dependent_variables[("PV_out_flow", t)]
+                + Time_dependent_variables[("Spill_flow", t)]
+            )
+            model.Add(pv_balance_expr - pv_limit_t <= s_pv)
+            model.Add(pv_limit_t - pv_balance_expr <= s_pv)
             slacks.append(s_pv)
         else:
-            model.Add(Time_dependent_variables[("PV_out_flow", t)] <= pv_limit_t)
+            model.Add(
+                Time_dependent_variables[("PV_out_flow", t)]
+                + Time_dependent_variables[("Spill_flow", t)]
+                == pv_limit_t
+            )
+        if surplus_handling == "must_absorb":
+            model.Add(Time_dependent_variables[("Spill_flow", t)] == 0)
 
         # MILP mode enforces explicit mutual exclusivity via binary on/off variables.
         if use_binaries:
             model.Add(Time_dependent_variables[("Binary_battery_in_flow",t)] + Time_dependent_variables[("Binary_battery_out_flow",t)] <= 1)
             model.Add(Time_dependent_variables[("Battery_in_flow",t)] <= Time_dependent_variables[("Binary_battery_in_flow",t)] * Battery_max_inflow)
             model.Add(Time_dependent_variables[("Battery_out_flow",t)] <= Time_dependent_variables[("Binary_battery_out_flow",t)] * Battery_max_outflow)
+        if battery_max_c_rate is not None:
+            model.Add(Time_dependent_variables[("Battery_in_flow", t)] <= battery_max_c_rate * Battery_capacity)
+            model.Add(Time_dependent_variables[("Battery_out_flow", t)] <= battery_max_c_rate * Battery_capacity)
         model.Add(Time_dependent_variables[("Battery_level", t)] <= Battery_capacity)
+        model.Add(Time_dependent_variables[("Battery_level", t)] >= min_soc_fraction * Battery_capacity)
         if t != timesteps[-1]:
             # Equation to calculate the battery level in the next time step t+1 based on the current time step t
             soc_next_expr = (
@@ -224,6 +270,7 @@ def setup(input_dict: dict, debug_infeasibility: bool = False):
         "battery_out_flow_vars": battery_out_flow_vars,
         "grid_flow_vars": grid_flow_vars,
         "pv_out_flow_vars": pv_out_flow_vars,
+        "spill_flow_vars": spill_flow_vars,
         "yearly_peak_var": Peak_grid_flow,
         "monthly_peak_vars": monthly_peak_vars,
     }
@@ -263,6 +310,7 @@ def summarize_solution(model, solution_handles):
     yearly_peak = solution_handles["yearly_peak_var"].solution_value() if solution_handles["yearly_peak_var"] else None
     monthly_peaks = {k: v.solution_value() for k, v in solution_handles["monthly_peak_vars"].items()}
     sum_monthly = sum(monthly_peaks.values()) if monthly_peaks else 0
+    curtailed_energy_kwh = sum(v.solution_value() for v in solution_handles["spill_flow_vars"]) * 0.25
     return {
         "battery_capacity_kwh": solution_handles["battery_capacity"].solution_value(),
         "objective_total_cost": model.Objective().Value(),
@@ -274,24 +322,57 @@ def summarize_solution(model, solution_handles):
         "yearly_peak": yearly_peak,
         "monthly_peaks": monthly_peaks,
         "sum_monthly_peaks": sum_monthly,
+        "curtailed_energy_kwh": curtailed_energy_kwh,
     }
 
 
 def compute_no_battery_baseline(input_dict):
-    """Compute the baseline import cost with no battery (all PV used to satisfy demand)."""
+    """Compute the no-battery baseline cost under the configured tariff structure."""
     timestep_hours = 0.25
     if len(input_dict.get("total_demand", [])) != len(input_dict.get("PV_capacity_factor", [])):
         raise ValueError("Input timeseries lengths must match for baseline computation.")
 
-    total_import_cost = 0.0
+    peak_shaving_cost_factor = float(input_dict["parameters"].get("peak_shaving_cost_factor", 0.0))
+    peak_shaving_frequency = input_dict["parameters"].get(
+        "peak_shaving_granularity",
+        input_dict["parameters"].get("peak_shaving_frequency", "yearly"),
+    ).lower()
+    surplus_handling = input_dict["parameters"].get("surplus_handling", "curtail").lower()
+    if peak_shaving_frequency not in {"yearly", "monthly"}:
+        raise ValueError("peak_shaving_granularity must be 'yearly' or 'monthly'")
+
+    grid_import_series = []
     for t, demand in enumerate(input_dict["total_demand"]):
         pv_limit = input_dict["PV_capacity_factor"][t] * input_dict["parameters"]["PV_max_capacity"]
-        imported_energy = max(0.0, demand - pv_limit)
-        price = input_dict["electricity_price"][t]
-        total_import_cost += imported_energy * price * timestep_hours
+        if surplus_handling == "must_absorb" and pv_limit > demand + 1e-9:
+            raise ValueError(
+                "No-battery baseline is infeasible under surplus_handling='must_absorb' because PV exceeds demand."
+            )
+        imported_power = max(0.0, demand - pv_limit)
+        grid_import_series.append(imported_power)
 
-    no_battery_opex = input_dict["parameters"].get("operation_and_maintenance", 0.0)
+    total_import_cost = sum(
+        imported_power * price * timestep_hours
+        for imported_power, price in zip(grid_import_series, input_dict["electricity_price"])
+    )
+
+    no_battery_peak_demand_cost = 0.0
+    if peak_shaving_cost_factor > 0 and grid_import_series:
+        if peak_shaving_frequency == "yearly":
+            no_battery_peak_demand_cost = peak_shaving_cost_factor * max(grid_import_series)
+        else:
+            timestamps = pd.to_datetime(input_dict["timestamps"])
+            df_temp = pd.DataFrame(
+                {
+                    "timestamp": timestamps,
+                    "grid_import": grid_import_series,
+                }
+            )
+            monthly_peaks = df_temp.groupby(df_temp["timestamp"].dt.to_period("M"))["grid_import"].max()
+            no_battery_peak_demand_cost = peak_shaving_cost_factor * float(monthly_peaks.sum())
+
     return {
         "no_battery_import_cost": total_import_cost,
-        "no_battery_total_cost": no_battery_opex + total_import_cost,
+        "no_battery_peak_demand_cost": no_battery_peak_demand_cost,
+        "no_battery_total_cost": total_import_cost + no_battery_peak_demand_cost,
     }

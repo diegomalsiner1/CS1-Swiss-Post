@@ -58,8 +58,7 @@ The optimization decides:
 Objective:
 
 - Minimize total annualized cost
-- `Total_Cost = Annualized_Battery_Cost + OPEX`
-- `OPEX = Fixed_O&M + Import_Cost`
+- `Total_Cost = Annualized_Battery_Cost + Battery_O&M + Import_Cost + Peak_Demand_Cost`
 
 The model runs on a fixed 15-minute timestep (`0.25 h`).
 
@@ -121,12 +120,17 @@ Main knobs in `config.py`:
 - `load_existing_input_dict`: use cached processed input (`True/False`)
 - `max_timesteps`: horizon cap (`None` or positive int)
 - `optimization_mode`: `"lp"` or `"milp"`
+- `surplus_handling`: `"curtail"` or `"must_absorb"`
 - `PV_max_capacity` (`kW`)
 - `Battery_max_inflow` (`kW`)
 - `Battery_max_outflow` (`kW`)
 - `Battery_max_capacity` (`kWh`) upper bound
+- `battery_max_c_rate` (`1/h`) power-to-energy coupling for charge and discharge
+- `battery_min_soc_fraction` (`-`) minimum state of charge reserve
 - `eta_charge`, `eta_discharge`, `eta_self_discharge`
 - `invest_cost` (`CHF/kWh`)
+- `battery_replacement_year` (year index in the business plan)
+- `battery_replacement_cost_fraction` (`-`) replacement CAPEX as share of initial CAPEX
 - `operation_and_maintenance` (`CHF`)
 - `interest_rate`, `lifetime` (for annualization)
 
@@ -138,6 +142,7 @@ Decision variables per timestep `t`:
 - `Battery_out_flow[t] >= 0`
 - `Grid_flow[t] >= 0`
 - `PV_out_flow[t] >= 0`
+- `Spill_flow[t] >= 0`
 - `Battery_level[t] >= 0`
 
 Global variable:
@@ -148,12 +153,18 @@ Core constraints:
 
 - Power balance:
 	- `Grid + PV + Battery_out - Battery_in = demand`
-- PV limit:
-	- `PV_out <= PV_capacity_factor[t] * PV_max_capacity`
+- PV allocation:
+	- `PV_out + Spill = PV_capacity_factor[t] * PV_max_capacity`
+	- if `surplus_handling = "must_absorb"`, then `Spill = 0`
 - Battery state dynamics:
 	- `SOC[t+1] = SOC[t]*(1-self_discharge) + 0.25*eta_charge*Battery_in - 0.25*(1/eta_discharge)*Battery_out`
 - SOC bounded by capacity:
 	- `Battery_level[t] <= Battery_capacity`
+- Minimum SOC reserve:
+	- `Battery_level[t] >= battery_min_soc_fraction * Battery_capacity`
+- Optional C-rate coupling:
+	- `Battery_in_flow[t] <= battery_max_c_rate * Battery_capacity`
+	- `Battery_out_flow[t] <= battery_max_c_rate * Battery_capacity`
 - Cyclic SOC boundary:
 	- `SOC[0] = 0.5*Battery_capacity`
 	- `SOC[last] = 0.5*Battery_capacity`
@@ -167,15 +178,17 @@ Objective terms:
 
 - `Import_Cost = sum(Grid_flow[t] * price[t] * 0.25)`
 - `Annualized_Battery_Cost = CRF(interest_rate, lifetime) * invest_cost * Battery_capacity`
-- `Total_Cost = Annualized_Battery_Cost + operation_and_maintenance + Import_Cost`
+- `Peak_Demand_Cost = peak_shaving_cost_factor * yearly_peak` or monthly sum of peaks
+- `Total_Cost = Annualized_Battery_Cost + operation_and_maintenance + Import_Cost + Peak_Demand_Cost`
 
 ## Baseline and Financial Metrics
 
 After optimization, the project computes:
 
 - No-battery baseline import cost (`no_battery_import_cost`)
+- No-battery baseline peak-demand cost (`no_battery_peak_demand_cost`)
 - No-battery total cost (`no_battery_total_cost`)
-- NPV and simple payback from annual savings (`results_processing.py`)
+- NPV, IRR, and payback from annual operating savings, with upfront CAPEX and optional replacement cashflow treated separately (`results_processing.py`)
 
 Financial cashflow table is exported as:
 
@@ -226,6 +239,7 @@ Processed input artifacts:
 ## Current Scope and Limitations
 
 - Grid flow is modeled as non-negative import only (no export variable).
+- Curtailment/spillage can be allowed via `surplus_handling = "curtail"` without any export revenue.
 - Electricity price is currently set as constant `0.30 CHF/kWh` during input generation.
 - LP mode may allow physically unrealistic simultaneous charging/discharging.
 

@@ -3,23 +3,76 @@ import pandas as pd
 import json
 from pathlib import Path
 
+def _npv_at_rate(cashflows, rate):
+    return sum(cf / ((1 + rate) ** year) for year, cf in enumerate(cashflows))
+
+
+def _solve_irr(cashflows, tol=1e-7, max_iter=200):
+    if not cashflows:
+        return np.nan
+    if not any(cf < 0 for cf in cashflows) or not any(cf > 0 for cf in cashflows):
+        return np.nan
+
+    lower = -0.9999
+    upper = 0.1
+    npv_lower = _npv_at_rate(cashflows, lower)
+    npv_upper = _npv_at_rate(cashflows, upper)
+
+    while npv_lower * npv_upper > 0 and upper < 1e6:
+        upper = (upper + 1.0) * 2.0 - 1.0
+        npv_upper = _npv_at_rate(cashflows, upper)
+
+    if npv_lower == 0:
+        return lower
+    if npv_upper == 0:
+        return upper
+    if npv_lower * npv_upper > 0:
+        return np.nan
+
+    for _ in range(max_iter):
+        mid = (lower + upper) / 2.0
+        npv_mid = _npv_at_rate(cashflows, mid)
+        if abs(npv_mid) < tol:
+            return mid
+        if npv_lower * npv_mid <= 0:
+            upper = mid
+            npv_upper = npv_mid
+        else:
+            lower = mid
+            npv_lower = npv_mid
+
+    return (lower + upper) / 2.0
+
+
 def compute_financial_summary(input_dict, solution_summary):
     lifetime = int(input_dict["parameters"].get("lifetime", 20))
     discount_rate = float(input_dict["parameters"].get("interest_rate", 0.06))
     invest_cost_per_kwh = float(input_dict["parameters"].get("Battery_invest_cost", 0.0))
     battery_capacity = float(solution_summary.get("battery_capacity_kwh", 0.0))
+    replacement_year = input_dict["parameters"].get("battery_replacement_year")
+    replacement_cost_fraction = float(input_dict["parameters"].get("battery_replacement_cost_fraction", 0.0))
+    if replacement_year is not None:
+        replacement_year = int(replacement_year)
+        if replacement_year <= 0:
+            raise ValueError("battery_replacement_year must be positive when provided")
 
     investment = -battery_capacity * invest_cost_per_kwh
-    no_battery_import_cost = float(solution_summary.get("no_battery_import_cost", np.nan))
-    battery_import_cost = float(solution_summary.get("import_cost", np.nan))
-    annual_savings = no_battery_import_cost - battery_import_cost
+    replacement_cost = battery_capacity * invest_cost_per_kwh * replacement_cost_fraction
+    no_battery_total_cost = float(solution_summary.get("no_battery_total_cost", np.nan))
+    optimized_total_cost = float(solution_summary.get("objective_total_cost", np.nan))
+    annualized_battery_cost = float(solution_summary.get("annualized_battery_cost", 0.0))
+    annual_total_cost_reduction = no_battery_total_cost - optimized_total_cost
+    annual_savings = no_battery_total_cost - (optimized_total_cost - annualized_battery_cost)
 
     years = list(range(0, lifetime + 1))
     cashflows = [investment] + [annual_savings] * lifetime
+    if replacement_year is not None and replacement_year <= lifetime:
+        cashflows[replacement_year] -= replacement_cost
     discount_factors = [(1 + discount_rate) ** (-y) for y in years]
     discounted_cashflows = [cf * df for cf, df in zip(cashflows, discount_factors)]
     
     npv = sum(discounted_cashflows)
+    irr = _solve_irr(cashflows)
 
     # Simple payback period
     cumulative = 0.0
@@ -47,8 +100,12 @@ def compute_financial_summary(input_dict, solution_summary):
 
     return {
         "investment_cost": -investment,
+        "replacement_cost": replacement_cost,
+        "replacement_year": replacement_year,
+        "annual_total_cost_reduction": annual_total_cost_reduction,
         "annual_savings": annual_savings,
         "npv": npv,
+        "irr": irr,
         "payback_years": payback,
         "discounted_payback_years": discounted_payback,
         "annual_financials_df": annual_financials_df,
@@ -58,11 +115,16 @@ def compute_financial_summary(input_dict, solution_summary):
 def build_baseline_vs_optimized_table(solution_summary, financial_results):
     baseline_import_cost = float(solution_summary.get("no_battery_import_cost", np.nan))
     optimized_import_cost = float(solution_summary.get("import_cost", np.nan))
+    baseline_peak_cost = float(solution_summary.get("no_battery_peak_demand_cost", np.nan))
+    optimized_peak_cost = float(solution_summary.get("peak_demand_cost", np.nan))
     baseline_total_cost = float(solution_summary.get("no_battery_total_cost", np.nan))
     optimized_total_cost = float(solution_summary.get("objective_total_cost", np.nan))
     investment_cost = float(financial_results.get("investment_cost", np.nan))
+    replacement_cost = float(financial_results.get("replacement_cost", np.nan))
+    replacement_year = financial_results.get("replacement_year")
     annualized_battery_cost = float(solution_summary.get("annualized_battery_cost", np.nan))
     npv = float(financial_results.get("npv", np.nan))
+    irr = float(financial_results.get("irr", np.nan))
     payback_years = float(financial_results.get("payback_years", np.nan))
     discounted_payback_years = float(financial_results.get("discounted_payback_years", np.nan))
 
@@ -95,6 +157,13 @@ def build_baseline_vs_optimized_table(solution_summary, financial_results):
             "Unit": "CHF/year",
         },
         {
+            "Metric": "Annual peak-demand cost",
+            "Baseline": baseline_peak_cost,
+            "Optimized": optimized_peak_cost,
+            "Optimized - Baseline": optimized_peak_cost - baseline_peak_cost,
+            "Unit": "CHF/year",
+        },
+        {
             "Metric": "Annual import cost savings",
             "Baseline": 0.0,
             "Optimized": import_cost_savings,
@@ -123,11 +192,25 @@ def build_baseline_vs_optimized_table(solution_summary, financial_results):
             "Unit": "CHF/year",
         },
         {
+            "Metric": "Replacement cost",
+            "Baseline": 0.0,
+            "Optimized": replacement_cost,
+            "Optimized - Baseline": replacement_cost,
+            "Unit": f"CHF (year {replacement_year})" if replacement_year is not None else "CHF",
+        },
+        {
             "Metric": "NPV",
             "Baseline": np.nan,
             "Optimized": npv,
             "Optimized - Baseline": np.nan,
             "Unit": "CHF",
+        },
+        {
+            "Metric": "IRR",
+            "Baseline": np.nan,
+            "Optimized": irr,
+            "Optimized - Baseline": np.nan,
+            "Unit": "-",
         },
         {
             "Metric": "Payback",
@@ -159,11 +242,16 @@ def compute_baseline_grid_import_series(input_dict):
     demand = np.asarray(input_dict.get("total_demand", []), dtype=float)
     pv_cf = np.asarray(input_dict.get("PV_capacity_factor", []), dtype=float)
     pv_max_capacity = float(input_dict["parameters"]["PV_max_capacity"])
+    surplus_handling = input_dict["parameters"].get("surplus_handling", "curtail").lower()
 
     if len(demand) != len(pv_cf):
         raise ValueError("Input timeseries lengths must match for baseline grid import computation.")
 
     pv_available = pv_cf * pv_max_capacity
+    if surplus_handling == "must_absorb" and np.any(pv_available > demand + 1e-9):
+        raise ValueError(
+            "No-battery baseline grid import is infeasible under surplus_handling='must_absorb' because PV exceeds demand."
+        )
     return np.maximum(demand - pv_available, 0.0)
 
 
@@ -309,6 +397,7 @@ def export_results(
     timestamps=None,
     input_dict=None,
     pv_flow=None,
+    spill_flow=None,
     grid_flow=None,
     total_load=None,
     battery_charge_power=None,
@@ -323,6 +412,7 @@ def export_results(
     if input_dict is not None:
         financial_results = compute_financial_summary(input_dict, solution_summary)
         solution_summary["npv"] = financial_results["npv"]
+        solution_summary["irr"] = financial_results["irr"]
         solution_summary["payback_years"] = financial_results["payback_years"]
         solution_summary["discounted_payback_years"] = financial_results["discounted_payback_years"]
         financial_results["annual_financials_df"].to_csv(run_dir / "financial_cashflows.csv", index=False)
@@ -347,6 +437,7 @@ def export_results(
     if timestamps is not None: data_map["timestamp"] = timestamps
     if battery_soc is not None: data_map["battery_soc"] = battery_soc
     if pv_flow is not None: data_map["pv_flow"] = pv_flow
+    if spill_flow is not None: data_map["spill_flow"] = spill_flow
     if grid_flow is not None: data_map["grid_flow"] = grid_flow
     if total_load is not None: data_map["total_load"] = total_load
     if battery_charge_power is not None: data_map["battery_charge_power"] = battery_charge_power

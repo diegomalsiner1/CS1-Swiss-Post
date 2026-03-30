@@ -4,7 +4,6 @@ from functools import reduce
 import json
 from datetime import datetime
 from pathlib import Path
-import data_preprocessing as dpp
 import config
 import time
 import optimization as opt
@@ -14,6 +13,31 @@ import results_processing as rp
 INPUT_DICT_PATH = Path("03-PROCESSED-DATA/input_dict.json")
 RESULTS_ROOT = Path("02-MODEL-RESULTS")
 DEBUG_INFEASIBILITY = False
+
+
+def get_runtime_parameters() -> dict:
+    return {
+        "PV_max_capacity": config.PV_max_capacity,
+        "Battery_max_inflow": config.Battery_max_inflow,
+        "Battery_max_outflow": config.Battery_max_outflow,
+        "Battery_max_capacity": config.Battery_max_capacity,
+        "battery_max_c_rate": getattr(config, "battery_max_c_rate", None),
+        "battery_min_soc_fraction": getattr(config, "battery_min_soc_fraction", 0.0),
+        "Battery_eta_charge": config.eta_charge,
+        "Battery_eta_discharge": config.eta_discharge,
+        "Battery_eta_self_discharge": config.eta_self_discharge,
+        "Battery_invest_cost": config.invest_cost,
+        "operation_and_maintenance": config.operation_and_maintenance,
+        "interest_rate": config.interest_rate,
+        "lifetime": config.lifetime,
+        "battery_degrading": config.battery_degrading,
+        "optimization_mode": config.optimization_mode,
+        "peak_shaving_cost_factor": config.peak_shaving_cost_factor,
+        "peak_shaving_frequency": config.peak_shaving_frequency,
+        "surplus_handling": getattr(config, "surplus_handling", "curtail"),
+        "battery_replacement_year": getattr(config, "battery_replacement_year", None),
+        "battery_replacement_cost_fraction": getattr(config, "battery_replacement_cost_fraction", 0.0),
+    }
 
 def create_run_output_dir(input_dict: dict) -> Path:
     mode = input_dict.get("parameters", {}).get("optimization_mode", "unknown")
@@ -45,7 +69,11 @@ def save_run_artifacts(run_dir: Path, input_dict: dict, solution_summary: dict, 
         "annualized_battery_cost": float(solution_summary["annualized_battery_cost"]),
         "peak_demand_cost": float(solution_summary.get("peak_demand_cost", 0.0)),
         "no_battery_import_cost": float(solution_summary.get("no_battery_import_cost", 0.0)),
+        "no_battery_peak_demand_cost": float(solution_summary.get("no_battery_peak_demand_cost", 0.0)),
         "no_battery_total_cost": float(solution_summary.get("no_battery_total_cost", 0.0)),
+        "curtailed_energy_kwh": float(solution_summary.get("curtailed_energy_kwh", 0.0)),
+        "replacement_cost": float(solution_summary.get("replacement_cost", 0.0)),
+        "replacement_year": solution_summary.get("replacement_year"),
         "npv": float(solution_summary.get("npv", np.nan)),
         "irr": float(solution_summary.get("irr", np.nan)),
         "payback_years": float(solution_summary.get("payback_years", np.nan)),
@@ -92,6 +120,8 @@ def apply_timestep_cap(input_dict: dict, max_timesteps) -> dict:
 
 
 def build_input_dict_from_raw_data() -> dict:
+    import data_preprocessing as dpp
+
     # ==========================================================
     # Data Preprocessing
     # ==========================================================
@@ -139,23 +169,7 @@ def build_input_dict_from_raw_data() -> dict:
     merged_df["electricity_price"] = price_chf_per_kwh
 
     return {
-        "parameters": {
-            "PV_max_capacity": config.PV_max_capacity,
-            "Battery_max_inflow": config.Battery_max_inflow,
-            "Battery_max_outflow": config.Battery_max_outflow,
-            "Battery_max_capacity": config.Battery_max_capacity,
-            "Battery_eta_charge": config.eta_charge,
-            "Battery_eta_discharge": config.eta_discharge,
-            "Battery_eta_self_discharge": config.eta_self_discharge,
-            "Battery_invest_cost": config.invest_cost,
-            "operation_and_maintenance": config.operation_and_maintenance,
-            "interest_rate": config.interest_rate,
-            "lifetime": config.lifetime,
-            "battery_degrading": config.battery_degrading,
-            "optimization_mode": config.optimization_mode,
-            "peak_shaving_cost_factor": config.peak_shaving_cost_factor,
-            "peak_shaving_frequency": config.peak_shaving_frequency,
-        },
+        "parameters": get_runtime_parameters(),
         "timestamps": merged_df["timestamp"].astype(str).tolist(),
         "total_demand": merged_df["total_demand"].tolist(),
         "PV_capacity_factor": merged_df["PV_capacity_factor"].tolist(),
@@ -173,6 +187,7 @@ def load_or_build_input_dict() -> dict:
         with INPUT_DICT_PATH.open("r", encoding="utf-8") as f:
             print(f"Loading input dictionary from {INPUT_DICT_PATH}")
             input_dict = json.load(f)
+        input_dict["parameters"] = get_runtime_parameters()
 
         steps_before = len(input_dict.get("total_demand", []))
         input_dict = apply_timestep_cap(input_dict, config.max_timesteps)
@@ -196,6 +211,12 @@ def run_battery_size_sensitivity(input_dict: dict, battery_sizes_kwh) -> pd.Data
     rows = []
     baseline_summary = opt.compute_no_battery_baseline(input_dict)
     invest_cost_per_kwh = float(input_dict["parameters"].get("Battery_invest_cost", 0.0))
+    interest_rate = float(input_dict["parameters"].get("interest_rate", 0.0))
+    lifetime = int(input_dict["parameters"].get("lifetime", 1))
+    if interest_rate == 0:
+        crf = 1 / lifetime
+    else:
+        crf = (((1 + interest_rate) ** lifetime) * interest_rate) / (((1 + interest_rate) ** lifetime) - 1)
 
     for battery_size_kwh in battery_sizes_kwh:
         print(f"Running sensitivity case for fixed battery size = {battery_size_kwh} kWh")
@@ -205,8 +226,10 @@ def run_battery_size_sensitivity(input_dict: dict, battery_sizes_kwh) -> pd.Data
                 "objective_total_cost": float(baseline_summary["no_battery_total_cost"]),
                 "opex": float(baseline_summary["no_battery_total_cost"]),
                 "import_cost": float(baseline_summary["no_battery_import_cost"]),
-                "fixed_om_cost": float(input_dict["parameters"].get("operation_and_maintenance", 0.0)),
+                "fixed_om_cost": 0.0,
                 "annualized_battery_cost": 0.0,
+                "peak_demand_cost": float(baseline_summary.get("no_battery_peak_demand_cost", 0.0)),
+                "curtailed_energy_kwh": 0.0,
                 **baseline_summary,
             }
             rows.append(
@@ -215,9 +238,11 @@ def run_battery_size_sensitivity(input_dict: dict, battery_sizes_kwh) -> pd.Data
                     "optimized_battery_capacity_kwh": 0.0,
                     "objective_total_cost": float(solution_summary["objective_total_cost"]),
                     "import_cost": float(solution_summary["import_cost"]),
+                    "peak_demand_cost": float(solution_summary["peak_demand_cost"]),
                     "annualized_battery_cost": 0.0,
                     "annual_savings": 0.0,
                     "npv": 0.0,
+                    "irr": np.nan,
                     "payback_years": np.nan,
                     "discounted_payback_years": np.nan,
                     "status": "baseline",
@@ -248,9 +273,11 @@ def run_battery_size_sensitivity(input_dict: dict, battery_sizes_kwh) -> pd.Data
                     "optimized_battery_capacity_kwh": float(battery_size_kwh),
                     "objective_total_cost": np.nan,
                     "import_cost": np.nan,
-                    "annualized_battery_cost": float(battery_size_kwh) * invest_cost_per_kwh,
+                    "peak_demand_cost": np.nan,
+                    "annualized_battery_cost": float(battery_size_kwh) * invest_cost_per_kwh * crf,
                     "annual_savings": np.nan,
                     "npv": np.nan,
+                    "irr": np.nan,
                     "payback_years": np.nan,
                     "discounted_payback_years": np.nan,
                     "status": "infeasible",
@@ -264,9 +291,11 @@ def run_battery_size_sensitivity(input_dict: dict, battery_sizes_kwh) -> pd.Data
                 "optimized_battery_capacity_kwh": float(solution_summary["battery_capacity_kwh"]),
                 "objective_total_cost": float(solution_summary["objective_total_cost"]),
                 "import_cost": float(solution_summary["import_cost"]),
+                "peak_demand_cost": float(solution_summary["peak_demand_cost"]),
                 "annualized_battery_cost": float(solution_summary["annualized_battery_cost"]),
                 "annual_savings": float(financial_summary["annual_savings"]),
                 "npv": float(financial_summary["npv"]),
+                "irr": float(financial_summary["irr"]),
                 "payback_years": float(financial_summary["payback_years"]),
                 "discounted_payback_years": float(financial_summary["discounted_payback_years"]),
                 "status": status,
@@ -287,12 +316,14 @@ solution_summary = opt.summarize_solution(model, solution_handles)
 run_seconds = time.perf_counter() - run_start
 baseline_summary = opt.compute_no_battery_baseline(input_dict)
 solution_summary.update(baseline_summary)
+solution_summary.update(rp.compute_financial_summary(input_dict, solution_summary))
 save_run_artifacts(run_dir, input_dict, solution_summary, run_seconds)
 
 battery_soc = [v.solution_value() for v in solution_handles["battery_level_vars"]]
 battery_charge_power = [v.solution_value() for v in solution_handles["battery_in_flow_vars"]]
 battery_discharge_power = [v.solution_value() for v in solution_handles["battery_out_flow_vars"]]
 pv_flow = [v.solution_value() for v in solution_handles["pv_out_flow_vars"]]
+spill_flow = [v.solution_value() for v in solution_handles["spill_flow_vars"]]
 grid_flow = [v.solution_value() for v in solution_handles["grid_flow_vars"]]
 total_load = input_dict.get("total_demand", [])
 timestamps = input_dict.get("timestamps")
@@ -303,6 +334,7 @@ rp.export_results(
     timestamps=timestamps,
     input_dict=input_dict,
     pv_flow=pv_flow,
+    spill_flow=spill_flow,
     grid_flow=grid_flow,
     total_load=total_load,
     battery_charge_power=battery_charge_power,
