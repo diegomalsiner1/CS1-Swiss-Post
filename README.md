@@ -89,7 +89,7 @@ End-to-end pipeline in `main.py`:
 5. Compute no-battery baseline
 6. Export run artifacts in timestamped folder under `02-MODEL-RESULTS/`
 
-## Input Data Sources
+## Input Data Sources --> See also "File Formatting"
 
 When `load_existing_input_dict = False`, raw data is read from an Excel file selected via GUI dialog (`tkinter`):
 
