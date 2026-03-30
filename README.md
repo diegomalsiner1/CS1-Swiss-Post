@@ -171,15 +171,47 @@ Objective terms:
 
 ## Baseline and Financial Metrics
 
-After optimization, the project computes:
+### Baseline scenario (what it means)
 
-- No-battery baseline import cost (`no_battery_import_cost`)
-- No-battery total cost (`no_battery_total_cost`)
-- NPV and simple payback from annual savings (`results_processing.py`)
+The baseline is a **no-battery counterfactual** built on the same demand, PV availability, timestep, and electricity price as the optimized run.
 
-Financial cashflow table is exported as:
+For each 15-minute timestep:
+
+- `PV_available[t] = PV_capacity_factor[t] * PV_max_capacity`
+- `Baseline_Grid_Import[t] = max(0, total_demand[t] - PV_available[t])`
+
+From that, the model computes:
+
+- `no_battery_import_cost = sum(Baseline_Grid_Import[t] * electricity_price[t] * 0.25)`
+- `no_battery_total_cost = no_battery_import_cost + operation_and_maintenance`
+
+### What is included in baseline
+
+- Same load profile as optimized scenario
+- Same PV availability profile
+- Same electricity tariff profile
+- Fixed O&M (`operation_and_maintenance`)
+
+### What is not included in baseline
+
+- Any battery operation (no charging/discharging, no SOC dynamics)
+- Battery investment / annualized battery cost
+- Grid export revenue (export is not modeled)
+- Peak-demand penalty term (currently only in optimized objective, if enabled)
+
+### Financial metrics
+
+`results_processing.py` computes:
+
+- Annual savings (`no_battery_import_cost - import_cost`)
+- NPV
+- Simple payback
+- Discounted payback
+
+Exports:
 
 - `financial_cashflows.csv`
+- `baseline_vs_optimized.csv`
 
 ## How To Run
 
@@ -228,6 +260,7 @@ Processed input artifacts:
 - Grid flow is modeled as non-negative import only (no export variable).
 - Electricity price is currently set as constant `0.30 CHF/kWh` during input generation.
 - LP mode may allow physically unrealistic simultaneous charging/discharging.
+- `no_battery_total_cost` includes import cost + fixed O&M, but does not currently add peak-demand penalties; if peak-demand cost is enabled in optimization, total-cost comparisons should be interpreted with that asymmetry in mind.
 
 ## Key Files
 
