@@ -3,7 +3,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import tkinter as tk
+import re
 from tkinter import filedialog
+from datetime import datetime, time
+from openpyxl import load_workbook
 
 ## Will be used to process the input data before feeding the data into the optimization framework
 
@@ -99,7 +102,10 @@ def select_sheets(label_text):
 
     file_path = get_input_file_path()
     df = pd.read_excel(file_path, sheet_name=None)
-    sheet_list = list(df.keys())
+    sheet_list = [
+        sheet for sheet in df.keys()
+        if sheet != "config" and not str(sheet).startswith("_xlnm.")
+    ]
     selection = []
     root = tk.Tk()
     root.title("Select Data Sheet(s)")
@@ -123,6 +129,147 @@ def select_sheets(label_text):
     root.mainloop()
 
     return(selection)
+
+
+def _parse_excel_time(value):
+    """
+    Convert Excel/Pandas/string time values to a Python time object.
+    """
+    if pd.isna(value):
+        return None
+
+    if isinstance(value, pd.Timestamp):
+        return value.time()
+
+    if isinstance(value, datetime):
+        return value.time()
+
+    if isinstance(value, time):
+        return value
+
+    if isinstance(value, (int, float)):
+        # Excel stores times as fractions of a day.
+        try:
+            base = pd.Timestamp("1899-12-30")
+            return (base + pd.to_timedelta(float(value), unit="D")).time()
+        except Exception:
+            return None
+
+    try:
+        parsed = pd.to_datetime(str(value), format="%H:%M:%S", errors="coerce")
+        return None if pd.isna(parsed) else parsed.time()
+    except Exception:
+        return None
+
+
+def _normalize_cell_ref(ref: str) -> str:
+    return ref.replace("$", "").upper()
+
+
+def _evaluate_excel_formula_cell(worksheet, cell_ref: str, cache: dict):
+    """
+    Evaluate a small subset of Excel formulas needed by the input workbook.
+    Supports direct values plus formulas using SUM/MIN/MAX and arithmetic.
+    """
+    cell_ref = _normalize_cell_ref(cell_ref)
+    if cell_ref in cache:
+        return cache[cell_ref]
+
+    cell = worksheet[cell_ref]
+    value = cell.value
+
+    if value is None:
+        cache[cell_ref] = None
+        return None
+
+    if isinstance(value, (int, float)):
+        cache[cell_ref] = float(value)
+        return cache[cell_ref]
+
+    if isinstance(value, str) and value.startswith("="):
+        formula = value[1:].strip()
+
+        def cell_value(ref: str):
+            return _evaluate_excel_formula_cell(worksheet, ref, cache) or 0.0
+
+        def range_values(start_ref: str, end_ref: str):
+            cells = worksheet[f"{_normalize_cell_ref(start_ref)}:{_normalize_cell_ref(end_ref)}"]
+            values = []
+            for row in cells:
+                for item in row:
+                    values.append(_evaluate_excel_formula_cell(worksheet, item.coordinate, cache) or 0.0)
+            return values
+
+        python_expr = re.sub(
+            r"([A-Z]+\d+):([A-Z]+\d+)",
+            lambda match: f'RANGE_VALUES("{match.group(1)}", "{match.group(2)}")',
+            formula,
+        )
+        python_expr = re.sub(r"\bSUM\s*\(", "sum(", python_expr, flags=re.IGNORECASE)
+        python_expr = re.sub(r"\bMIN\s*\(", "min(", python_expr, flags=re.IGNORECASE)
+        python_expr = re.sub(r"\bMAX\s*\(", "max(", python_expr, flags=re.IGNORECASE)
+        python_expr = re.sub(
+            r"(?<![A-Z0-9_\"'])\b([A-Z]+\d+)\b(?![A-Z0-9_\"'])",
+            lambda match: f'CELL("{match.group(1)}")',
+            python_expr,
+        )
+        python_expr = python_expr.replace("^", "**")
+
+        try:
+            evaluated = eval(
+                python_expr,
+                {"__builtins__": {}},
+                {"CELL": cell_value, "RANGE_VALUES": range_values, "sum": sum, "min": min, "max": max},
+            )
+        except Exception as exc:
+            raise ValueError(f"Could not evaluate Excel formula '{value}' in cell {cell_ref}") from exc
+
+        cache[cell_ref] = None if evaluated is None else float(evaluated)
+        return cache[cell_ref]
+
+    numeric = pd.to_numeric(value, errors="coerce")
+    cache[cell_ref] = None if pd.isna(numeric) else float(numeric)
+    return cache[cell_ref]
+
+
+def _load_lkw_template_from_excel(file_path, sheet_name):
+    """
+    Read the LKW template with openpyxl so derived Excel columns can be
+    recomputed even when the workbook has no cached formula results.
+    """
+    workbook = load_workbook(file_path, data_only=False, read_only=False)
+    try:
+        worksheet = workbook[sheet_name]
+        formula_cache = {}
+        rows = []
+
+        for row_idx in range(3, worksheet.max_row + 1):
+            time_value = _parse_excel_time(worksheet[f"A{row_idx}"].value)
+            lkw_kw = _evaluate_excel_formula_cell(worksheet, f"E{row_idx}", formula_cache)
+            if lkw_kw is None:
+                total_kwh = _evaluate_excel_formula_cell(worksheet, f"D{row_idx}", formula_cache)
+                if total_kwh is not None:
+                    lkw_kw = 4 * total_kwh
+
+            rows.append({"row_idx": row_idx, "time": time_value, "lkw_kW": lkw_kw})
+
+        df = pd.DataFrame(rows)
+
+        # Some templates leave the first quarter-hour unlabeled although the
+        # derived power formula is present. Recover that midnight slot.
+        first_data_row_missing_time = (
+            not df.empty
+            and df.iloc[0]["row_idx"] == 3
+            and pd.isna(df.iloc[0]["time"])
+            and pd.notna(df.iloc[0]["lkw_kW"])
+        )
+        if first_data_row_missing_time:
+            df.loc[df["row_idx"] == 3, "time"] = time(0, 0)
+
+        df = df.dropna(subset=["time", "lkw_kW"]).sort_values("time")
+        return df.drop(columns=["row_idx"])
+    finally:
+        workbook.close()
 
 
 
@@ -304,33 +451,13 @@ def generate_lkw_profile(file_path=None, year=None, sheet_name=None):
         print("no worksheet selected for charging profile generation")
         return
 
-    df = pd.read_excel(
-        file_path,
-        sheet_name=sheet_name,
-        header=1
-    )
-
-    # Find exact Total kW column
-    power_col = None
-    for col in df.columns:
-        if str(col).strip() == "Total kW":
-            power_col = col
-            break
-
-    if power_col is None:
-        raise ValueError("Exact column 'Total kW' not found.")
-
-    time_col = df.columns[0]
-    df = df[[time_col, power_col]]
-    df.columns = ["time", "lkw_kW"]
-
-    df["time"] = pd.to_datetime(df["time"], format="%H:%M:%S", errors="coerce")
-    df["lkw_kW"] = pd.to_numeric(df["lkw_kW"], errors="coerce")
-
-    df = df.dropna().sort_values("time")
+    df = _load_lkw_template_from_excel(file_path, sheet_name)
 
     if len(df) != 96:
-        raise ValueError("LKW profile must contain 96 rows (15-min full weekday).")
+        raise ValueError(
+            f"LKW profile in sheet '{sheet_name}' must contain 96 valid 15-min rows after parsing. "
+            f"Found {len(df)} rows."
+        )
 
     daily_profile = df["lkw_kW"].values
 
