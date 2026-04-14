@@ -1,219 +1,34 @@
-# CS1-Swiss-Post
-Instructions on file import:
-
-File formatting:
-
-1. Data must be entered into an Excel file that follows the structure of "input_template.xlsx".
-2. For the Trafo and PV data:
-    2.1 Timestamps must be stored under column "Zeit".
-    2.2 Timestamps must be stored in 10 minute intervals.
-    2.3 Column title must include "-avg[W]" for power values.
-3. Amount of trafo input sheets is arbitrary.
-4. For the EV charging profile (LKW):
-    4.1 Data must contain a time column in HH:MM:SS format.
-    4.2 Data must contain a column with the exact name "Total kW".
-    4.3 time column must be in 15-minute resolution covering one full weekday example.
-    4.5 Saturday and Sunday are assumed to be 0 load.
-5. For the delivery data (Zustellung):
-    5.1 Data must be provided as a full-day template (00:00–23:45).
-    5.2 First column must contain time values in HH:MM:SS format.
-    5.3 One column must exist for each weekday from monday to saturday containing power in kW.
-    5.5 Sunday is not included and is assumed to be 0.
-    5.6 Data represents winter baseline conditions (summer adjustment is applied in processing).
-
-
-Configuration:
-
-1. Configurable variables are in a separate worksheet in the input excel file under "config" (as in "input_template.xlsx"). 
-2. Only ever change entries in the "values" column. 
-3. Expected value types are mentioned in "comments" column in the respective row.
-
-
-Data Selection:
-
-1. Upon running "main.py", a file dialogue window will be
-opened. Select the Excel file with relevant data. The "input_template.xlsx" may be selected to see an example run.
-2. A window will open after a short time prompting the user
-to select sheets including transformer data. Select all
-relevant sheets and click "Apply & Exit".
-3. A subsequent window will open prompting the user to select
-PV data if available. Select all relevant sheets and click 
-"Apply & Exit".
-4. The same pattern goes for the PV charging sheet as well as the delivery profile sheet.
-
+# CS1 Swiss Post
 
 Battery sizing and dispatch optimization for a Swiss Post case study.
 
-This project builds a 15-minute load/PV dataset, solves a linear optimization model for battery operation and sizing, and exports technical and financial KPIs.
+This repository builds a 15-minute site-level power dataset from Excel inputs, solves a linear optimization model for battery operation and capacity, and exports technical and financial KPIs.
 
-## What This Model Does
+## Repository Overview
 
-The optimization decides:
+Main production files:
 
-- Battery capacity (`kWh`)
-- Battery charging/discharging trajectory (`kW` per timestep)
-- Grid import (`kW` per timestep)
-- PV usage (`kW` per timestep)
+- `main.py`: end-to-end orchestration (load/build input data, solve optimization, export artifacts)
+- `data_preprocessing.py`: Excel ingestion, cleaning, 10-minute to 15-minute conversion, EV profile generation
+- `optimization.py`: OR-Tools LP/MILP formulation and solver call
+- `results_processing.py`: KPI tables, financial analysis, and CSV/JSON exports
+- `config.py`: runtime parameters currently consumed by `main.py`
 
-Objective:
+Supporting files:
 
-- Minimize total annualized cost
-- `Total_Cost = Annualized_Battery_Cost + OPEX`
-- `OPEX = Fixed_O&M + Import_Cost`
+- `config_new.py`: alternate config loader from Excel `CONFIG_INPUTS` sheet (not used by `main.py` by default)
+- `first_test.py`, `Test.py`: exploratory/test scripts
+- `prepare_input_excel.ipynb`: creates a template workbook with a `CONFIG_INPUTS` sheet
+- `visualize_data_processed.ipynb`: quick checks/plots for `03-PROCESSED-DATA/data_processed.csv`
+- `results_sheet.ipynb`: report-style visualization for the latest optimization run
 
-The model runs on a fixed 15-minute timestep (`0.25 h`).
+Data/result folders:
 
-## Optimization Modes
+- `01-INPUT-DATA/`: raw Excel inputs and templates
+- `02-MODEL-RESULTS/`: timestamped run outputs
+- `03-PROCESSED-DATA/`: generated intermediate artifacts (`data_processed.csv`, `input_dict.json`)
 
-Configured in `config.py` with `optimization_mode`:
-
-- `"milp"`: adds binary variables to prevent simultaneous charge/discharge
-- `"lp"`: removes binary variables (faster solve, but simultaneous charge/discharge can occur)
-
-In LP mode, these binary variables and related constraints are disabled:
-
-- `Binary_battery_in_flow[t]`
-- `Binary_battery_out_flow[t]`
-- Mutual exclusivity constraints linking battery flows to binaries
-
-Solver backend: OR-Tools CBC (`ortools.linear_solver.pywraplp`).
-
-## Data Flow
-
-End-to-end pipeline in `main.py`:
-
-1. Load or generate input dictionary (`03-PROCESSED-DATA/input_dict.json`)
-2. Optionally cap horizon with `max_timesteps`
-3. Build optimization model (`optimization.py`)
-4. Solve model and summarize KPIs
-5. Compute no-battery baseline
-6. Export run artifacts in timestamped folder under `02-MODEL-RESULTS/`
-
-## Input Data Sources --> See also "File Formatting"
-
-When `load_existing_input_dict = False`, raw data is read from an Excel file selected via GUI dialog (`tkinter`):
-
-- Transformer/grid data via selected sheets
-- PV data via selected PV sheet
-- EV profiles:
-	- `Zubau_LKW_Aug2025` (weekday profile repeated over year)
-	- `Zubau_Zustellung_Oct2026` (weekday-dependent profile, Sunday=0, summer reduction)
-
-Preprocessing behavior in `data_preprocessing.py`:
-
-- Trafo data cleaned and aligned
-- 10-minute series converted to 15-minute (energy-conserving conversion)
-- EV profiles expanded to full-year 15-minute series
-- Merged output written to `03-PROCESSED-DATA/data_processed.csv`
-
-Input dictionary structure (core keys):
-
-- `parameters`
-- `timestamps`
-- `total_demand`
-- `PV_capacity_factor`
-- `electricity_price`
-
-## Configuration
-
-Main knobs in `config.py`:
-
-- `load_existing_input_dict`: use cached processed input (`True/False`)
-- `max_timesteps`: horizon cap (`None` or positive int)
-- `optimization_mode`: `"lp"` or `"milp"`
-- `PV_max_capacity` (`kW`)
-- `Battery_max_inflow` (`kW`)
-- `Battery_max_outflow` (`kW`)
-- `Battery_max_capacity` (`kWh`) upper bound
-- `eta_charge`, `eta_discharge`, `eta_self_discharge`
-- `invest_cost` (`CHF/kWh`)
-- `operation_and_maintenance` (`CHF`)
-- `interest_rate`, `lifetime` (for annualization)
-
-## Model Formulation (Implemented)
-
-Decision variables per timestep `t`:
-
-- `Battery_in_flow[t] >= 0`
-- `Battery_out_flow[t] >= 0`
-- `Grid_flow[t] >= 0`
-- `PV_out_flow[t] >= 0`
-- `Battery_level[t] >= 0`
-
-Global variable:
-
-- `Battery_capacity` with upper bound `Battery_max_capacity`
-
-Core constraints:
-
-- Power balance:
-	- `Grid + PV + Battery_out - Battery_in = demand`
-- PV limit:
-	- `PV_out <= PV_capacity_factor[t] * PV_max_capacity`
-- Battery state dynamics:
-	- `SOC[t+1] = SOC[t]*(1-self_discharge) + 0.25*eta_charge*Battery_in - 0.25*(1/eta_discharge)*Battery_out`
-- SOC bounded by capacity:
-	- `Battery_level[t] <= Battery_capacity`
-- Cyclic SOC boundary:
-	- `SOC[0] = 0.5*Battery_capacity`
-	- `SOC[last] = 0.5*Battery_capacity`
-
-MILP-only constraints:
-
-- `Binary_in[t] + Binary_out[t] <= 1`
-- flow-binary linking constraints
-
-Objective terms:
-
-- `Import_Cost = sum(Grid_flow[t] * price[t] * 0.25)`
-- `Annualized_Battery_Cost = CRF(interest_rate, lifetime) * invest_cost * Battery_capacity`
-- `Total_Cost = Annualized_Battery_Cost + operation_and_maintenance + Import_Cost`
-
-## Baseline and Financial Metrics
-
-### Baseline scenario (what it means)
-
-The baseline is a **no-battery counterfactual** built on the same demand, PV availability, timestep, and electricity price as the optimized run.
-
-For each 15-minute timestep:
-
-- `PV_available[t] = PV_capacity_factor[t] * PV_max_capacity`
-- `Baseline_Grid_Import[t] = max(0, total_demand[t] - PV_available[t])`
-
-From that, the model computes:
-
-- `no_battery_import_cost = sum(Baseline_Grid_Import[t] * electricity_price[t] * 0.25)`
-- `no_battery_total_cost = no_battery_import_cost + operation_and_maintenance`
-
-### What is included in baseline
-
-- Same load profile as optimized scenario
-- Same PV availability profile
-- Same electricity tariff profile
-- Fixed O&M (`operation_and_maintenance`)
-
-### What is not included in baseline
-
-- Any battery operation (no charging/discharging, no SOC dynamics)
-- Battery investment / annualized battery cost
-- Grid export revenue (export is not modeled)
-- Peak-demand penalty term (currently only in optimized objective, if enabled)
-
-### Financial metrics
-
-`results_processing.py` computes:
-
-- Annual savings (`no_battery_import_cost - import_cost`)
-- NPV
-- Simple payback
-- Discounted payback
-
-Exports:
-
-- `financial_cashflows.csv`
-- `baseline_vs_optimized.csv`
-
-## How To Run
+## Environment Setup
 
 1. Create and activate a Python environment.
 2. Install dependencies:
@@ -222,50 +37,145 @@ Exports:
 pip install -r requirements.txt
 ```
 
-3. Set desired parameters in `config.py`.
-4. Run:
+## Input Data Requirements
+
+The main workflow expects a single Excel workbook selected through a file dialog.
+
+### Required sheet groups
+
+1. Transformer sheets (select one or more):
+- Must contain a time column named `Zeit`
+- Must contain at least one power column with `-avg[W]` in the header
+- Expected in 10-minute resolution
+
+2. PV sheet (select one):
+- Same `Zeit` + `-avg[W]` expectation as transformer sheets
+
+3. EV charging sheet (`LKW`, select one):
+- Expected as a 15-minute day profile with 96 valid rows after parsing
+- Parsed from Excel formulas/values by `data_preprocessing.py`
+
+4. Delivery profile sheet (`Zustellung`, select one):
+- First column must be time (`HH:MM:SS` style)
+- Columns for weekdays `Montag` to `Samstag`
+- Sunday is assumed zero
+
+### Important preprocessing behavior
+
+- Transformer and PV series are aligned and converted from 10-minute to 15-minute with energy-conserving conversion.
+- LKW profile is expanded over weekdays for the full year.
+- Zustellung profile is expanded over the full year (Mon-Sat), with April-September reduced to 60%.
+- Output is written to `03-PROCESSED-DATA/data_processed.csv`.
+
+## Configuration
+
+`main.py` imports `config.py`.
+
+Key parameters in `config.py` include:
+
+- `load_existing_input_dict`
+- `max_timesteps`
+- `optimization_mode` (`lp` or `milp`)
+- `PV_max_capacity`
+- `Battery_max_inflow`, `Battery_max_outflow`, `Battery_max_capacity`
+- `eta_charge`, `eta_discharge`, `eta_self_discharge`
+- `invest_cost`, `operation_and_maintenance`
+- `interest_rate`, `lifetime`
+- `peak_shaving_cost_factor`
+- `peak_shaving_frequency` (or `peak_shaving_granularity` key in input dictionary)
+
+Notes:
+
+- `load_existing_input_dict = True` requires `03-PROCESSED-DATA/input_dict.json` to exist.
+- If it does not exist, run once with `load_existing_input_dict = False`.
+- `max_timesteps` can be used to shorten runs for debugging.
+
+## How To Run
 
 ```bash
 python main.py
 ```
 
-## Output Structure
+When `load_existing_input_dict = False`, the script will open dialogs to:
 
-Each run creates a folder:
+1. Select the Excel file
+2. Select transformer sheets
+3. Select PV sheet
+4. Select EV charging sheet
+5. Select delivery profile sheet
+
+## Model Summary
+
+Solver backend:
+
+- OR-Tools CBC (`ortools.linear_solver.pywraplp`)
+
+Decision variables per timestep include:
+
+- Battery charge/discharge power
+- Battery state of charge
+- Grid import
+- PV dispatch
+
+Global decision variable:
+
+- Battery capacity
+
+Objective minimized:
+
+- `annualized_battery_cost + operation_and_maintenance + import_cost + peak_demand_cost`
+
+Modes:
+
+- `lp`: continuous model (faster; can allow simultaneous charge/discharge)
+- `milp`: adds binary exclusivity constraints for battery in/out flow
+
+## Baseline and Financial Outputs
+
+A no-battery baseline is computed on the same demand, PV availability, and tariffs.
+
+Financial post-processing computes and exports:
+
+- annual savings
+- NPV
+- simple payback
+- discounted payback
+
+## Output Files
+
+Each run creates a folder under:
 
 - `02-MODEL-RESULTS/<timestamp>_<mode>_<nsteps>steps/`
 
-Typical contents:
+Typical artifacts:
 
-- `settings_snapshot.json` (run settings and parameters)
-- `results_summary.json` (core KPIs)
-- `timeseries_results.csv` (aligned timestep results)
-- `financial_cashflows.csv` (yearly financial cashflows)
+- `settings_snapshot.json`
+- `results_summary.json`
+- `timeseries_results.csv`
+- `financial_cashflows.csv`
+- `baseline_vs_optimized.csv`
+- `peak_metrics.csv`
+- `top_peak_intervals.csv`
+- `monthly_summary.csv`
+- `battery_utilization_summary.csv`
+- `battery_size_sensitivity.csv` (if enabled)
 
-Processed input artifacts:
+Intermediate artifacts:
 
-- `03-PROCESSED-DATA/input_dict.json`
 - `03-PROCESSED-DATA/data_processed.csv`
+- `03-PROCESSED-DATA/input_dict.json`
 
-## Practical Notes
+## Known Caveats
 
-- `load_existing_input_dict=True` expects `03-PROCESSED-DATA/input_dict.json` to exist.
-- If not present, set `load_existing_input_dict=False` for one run to generate it.
-- `max_timesteps` can speed up debugging and test runs.
-- Preprocessing uses GUI sheet/file dialogs; this is not headless-server friendly.
-- CBC output is enabled in solve phase, so terminal logs can be verbose.
+- `data_preprocessing.py` currently rewrites `config.py` at import time from an Excel sheet named `config`.
+- `main.py` uses `config.py`, while `prepare_input_excel.ipynb` and `config_new.py` are built around a `CONFIG_INPUTS` sheet. This means there are two config workflows in the repository.
+- Grid export is not modeled (grid variable is non-negative import only).
+- Electricity price is currently set as a constant `0.30 CHF/kWh` when building fresh input data.
 
-## Current Scope and Limitations
+## Suggested Workflow
 
-- Grid flow is modeled as non-negative import only (no export variable).
-- Electricity price is currently set as constant `0.30 CHF/kWh` during input generation.
-- LP mode may allow physically unrealistic simultaneous charging/discharging.
-- `no_battery_total_cost` includes import cost + fixed O&M, but does not currently add peak-demand penalties; if peak-demand cost is enabled in optimization, total-cost comparisons should be interpreted with that asymmetry in mind.
-
-## Key Files
-
-- `main.py`: pipeline orchestration and artifact management
-- `optimization.py`: model variables, constraints, objective, solve
-- `data_preprocessing.py`: Excel ingestion, cleaning, profile generation
-- `results_processing.py`: KPI financial post-processing and exports
-- `config.py`: scenario and model parameters
+1. Place and format source Excel data in `01-INPUT-DATA/`.
+2. Set parameters in `config.py`.
+3. Run `python main.py`.
+4. Inspect outputs in the newest folder under `02-MODEL-RESULTS/`.
+5. Use notebooks for reporting and visualization.
