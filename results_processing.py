@@ -44,20 +44,70 @@ def _solve_irr(cashflows, tol=1e-7, max_iter=200):
     return (lower + upper) / 2.0
 
 
+def _estimate_replacement_timing(input_dict, solution_summary):
+    params = input_dict["parameters"]
+    cycle_life = params.get("battery_cycle_life")
+    calendar_life = params.get("battery_calendar_life_years")
+    fixed_replacement_year = params.get("battery_replacement_year")
+    equivalent_full_cycles = float(solution_summary.get("equivalent_full_cycles", np.nan))
+    battery_capacity = float(solution_summary.get("battery_capacity_kwh", 0.0))
+
+    if battery_capacity <= 1e-9:
+        return None, None, np.nan
+
+    candidate_years = []
+    cycle_based_years = np.nan
+
+    if cycle_life is not None:
+        cycle_life = float(cycle_life)
+        if cycle_life <= 0:
+            raise ValueError("battery_cycle_life must be positive when provided")
+        if np.isfinite(equivalent_full_cycles) and equivalent_full_cycles > 1e-9:
+            cycle_based_years = cycle_life / equivalent_full_cycles
+            candidate_years.append(("cycle_life", cycle_based_years))
+
+    if calendar_life is not None:
+        calendar_life = float(calendar_life)
+        if calendar_life <= 0:
+            raise ValueError("battery_calendar_life_years must be positive when provided")
+        candidate_years.append(("calendar_life", calendar_life))
+
+    if candidate_years:
+        replacement_basis, replacement_year_estimate = min(candidate_years, key=lambda x: x[1])
+        replacement_year = int(np.ceil(replacement_year_estimate))
+        return replacement_year, replacement_basis, cycle_based_years
+
+    if fixed_replacement_year is not None:
+        fixed_replacement_year = int(fixed_replacement_year)
+        if fixed_replacement_year <= 0:
+            raise ValueError("battery_replacement_year must be positive when provided")
+        return fixed_replacement_year, "fixed_year", cycle_based_years
+
+    return None, None, cycle_based_years
+
+
 def compute_financial_summary(input_dict, solution_summary):
     lifetime = int(input_dict["parameters"].get("lifetime", 20))
     discount_rate = float(input_dict["parameters"].get("interest_rate", 0.06))
-    invest_cost_per_kwh = float(input_dict["parameters"].get("Battery_invest_cost", 0.0))
+    invest_cost_per_kwh = float(
+        input_dict["parameters"].get(
+            "Battery_energy_invest_cost",
+            input_dict["parameters"].get("Battery_invest_cost", 0.0),
+        )
+    )
+    invest_cost_per_kw = float(input_dict["parameters"].get("Battery_power_invest_cost", 0.0))
     battery_capacity = float(solution_summary.get("battery_capacity_kwh", 0.0))
-    replacement_year = input_dict["parameters"].get("battery_replacement_year")
+    battery_power_capacity = float(solution_summary.get("battery_power_capacity_kw", 0.0))
     replacement_cost_fraction = float(input_dict["parameters"].get("battery_replacement_cost_fraction", 0.0))
-    if replacement_year is not None:
-        replacement_year = int(replacement_year)
-        if replacement_year <= 0:
-            raise ValueError("battery_replacement_year must be positive when provided")
+    replacement_year, replacement_basis, cycle_based_replacement_years = _estimate_replacement_timing(
+        input_dict,
+        solution_summary,
+    )
 
-    investment = -battery_capacity * invest_cost_per_kwh
-    replacement_cost = battery_capacity * invest_cost_per_kwh * replacement_cost_fraction
+    energy_investment_cost = battery_capacity * invest_cost_per_kwh
+    power_investment_cost = battery_power_capacity * invest_cost_per_kw
+    investment = -(energy_investment_cost + power_investment_cost)
+    replacement_cost = (energy_investment_cost + power_investment_cost) * replacement_cost_fraction
     no_battery_total_cost = float(solution_summary.get("no_battery_total_cost", np.nan))
     optimized_total_cost = float(solution_summary.get("objective_total_cost", np.nan))
     annualized_battery_cost = float(solution_summary.get("annualized_battery_cost", 0.0))
@@ -100,8 +150,12 @@ def compute_financial_summary(input_dict, solution_summary):
 
     return {
         "investment_cost": -investment,
+        "energy_investment_cost": energy_investment_cost,
+        "power_investment_cost": power_investment_cost,
         "replacement_cost": replacement_cost,
         "replacement_year": replacement_year,
+        "replacement_basis": replacement_basis,
+        "cycle_based_replacement_years": cycle_based_replacement_years,
         "annual_total_cost_reduction": annual_total_cost_reduction,
         "annual_savings": annual_savings,
         "npv": npv,
@@ -120,8 +174,11 @@ def build_baseline_vs_optimized_table(solution_summary, financial_results):
     baseline_total_cost = float(solution_summary.get("no_battery_total_cost", np.nan))
     optimized_total_cost = float(solution_summary.get("objective_total_cost", np.nan))
     investment_cost = float(financial_results.get("investment_cost", np.nan))
+    energy_investment_cost = float(financial_results.get("energy_investment_cost", np.nan))
+    power_investment_cost = float(financial_results.get("power_investment_cost", np.nan))
     replacement_cost = float(financial_results.get("replacement_cost", np.nan))
     replacement_year = financial_results.get("replacement_year")
+    replacement_basis = financial_results.get("replacement_basis")
     annualized_battery_cost = float(solution_summary.get("annualized_battery_cost", np.nan))
     npv = float(financial_results.get("npv", np.nan))
     irr = float(financial_results.get("irr", np.nan))
@@ -141,6 +198,13 @@ def build_baseline_vs_optimized_table(solution_summary, financial_results):
             "Optimized": float(solution_summary.get("battery_capacity_kwh", 0.0)),
             "Optimized - Baseline": float(solution_summary.get("battery_capacity_kwh", 0.0)),
             "Unit": "kWh",
+        },
+        {
+            "Metric": "Battery power rating",
+            "Baseline": 0.0,
+            "Optimized": float(solution_summary.get("battery_power_capacity_kw", 0.0)),
+            "Optimized - Baseline": float(solution_summary.get("battery_power_capacity_kw", 0.0)),
+            "Unit": "kW",
         },
         {
             "Metric": "Annual import cost",
@@ -185,6 +249,20 @@ def build_baseline_vs_optimized_table(solution_summary, financial_results):
             "Unit": "CHF",
         },
         {
+            "Metric": "CAPEX energy component",
+            "Baseline": 0.0,
+            "Optimized": energy_investment_cost,
+            "Optimized - Baseline": energy_investment_cost,
+            "Unit": "CHF",
+        },
+        {
+            "Metric": "CAPEX power component",
+            "Baseline": 0.0,
+            "Optimized": power_investment_cost,
+            "Optimized - Baseline": power_investment_cost,
+            "Unit": "CHF",
+        },
+        {
             "Metric": "Annualized battery cost",
             "Baseline": 0.0,
             "Optimized": annualized_battery_cost,
@@ -196,7 +274,11 @@ def build_baseline_vs_optimized_table(solution_summary, financial_results):
             "Baseline": 0.0,
             "Optimized": replacement_cost,
             "Optimized - Baseline": replacement_cost,
-            "Unit": f"CHF (year {replacement_year})" if replacement_year is not None else "CHF",
+            "Unit": (
+                f"CHF (year {replacement_year}, {replacement_basis})"
+                if replacement_year is not None and replacement_basis
+                else (f"CHF (year {replacement_year})" if replacement_year is not None else "CHF")
+            ),
         },
         {
             "Metric": "NPV",
@@ -444,6 +526,8 @@ def export_results(
     if battery_discharge_power is not None: data_map["battery_discharge_power"] = battery_discharge_power
     if input_dict is not None:
         data_map["baseline_grid_import"] = compute_baseline_grid_import_series(input_dict)
+        if "electricity_price" in input_dict:
+            data_map["electricity_price"] = input_dict["electricity_price"]
 
     # Find the minimum length across all provided arrays
     min_len = min(len(v) for v in data_map.values())

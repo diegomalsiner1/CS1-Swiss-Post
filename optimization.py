@@ -1,5 +1,6 @@
 from ortools.linear_solver import pywraplp
 import pandas as pd
+import numpy as np
 from tqdm import tqdm
 
 ## Will be used to define the optimization variables, constraints, and the objective function
@@ -42,7 +43,13 @@ def setup(
     eta_charge = input_dict["parameters"]["Battery_eta_charge"]
     eta_discharge = input_dict["parameters"]["Battery_eta_discharge"]
     eta_self_discharge = input_dict["parameters"]["Battery_eta_self_discharge"]
-    battery_invest_cost = input_dict["parameters"]["Battery_invest_cost"]
+    battery_invest_cost = float(
+        input_dict["parameters"].get(
+            "Battery_energy_invest_cost",
+            input_dict["parameters"].get("Battery_invest_cost", 0.0),
+        )
+    )
+    battery_power_invest_cost = float(input_dict["parameters"].get("Battery_power_invest_cost", 0.0))
     cost_operation_and_maintenance = input_dict["parameters"]["operation_and_maintenance"]
 
     interest_rate = input_dict["parameters"]["interest_rate"]
@@ -95,6 +102,12 @@ def setup(
         )
     else:
         Battery_capacity = model.NumVar(0, Battery_capacity_upper_bound, "Battery_Capacity")
+    Battery_power_capacity = model.NumVar(
+        0,
+        max(Battery_max_inflow, Battery_max_outflow),
+        "Battery_Power_Capacity",
+    )
+    power_capacity_upper_bound = max(Battery_max_inflow, Battery_max_outflow)
     
     # Peak demand variables for grid flow
     Peak_grid_flow = model.NumVar(0, inf, "Peak_Grid_Flow_Yearly") if peak_shaving_frequency == "yearly" else None
@@ -173,6 +186,8 @@ def setup(
             model.Add(Time_dependent_variables[("Binary_battery_in_flow",t)] + Time_dependent_variables[("Binary_battery_out_flow",t)] <= 1)
             model.Add(Time_dependent_variables[("Battery_in_flow",t)] <= Time_dependent_variables[("Binary_battery_in_flow",t)] * Battery_max_inflow)
             model.Add(Time_dependent_variables[("Battery_out_flow",t)] <= Time_dependent_variables[("Binary_battery_out_flow",t)] * Battery_max_outflow)
+        model.Add(Time_dependent_variables[("Battery_in_flow", t)] <= Battery_power_capacity)
+        model.Add(Time_dependent_variables[("Battery_out_flow", t)] <= Battery_power_capacity)
         if battery_max_c_rate is not None:
             model.Add(Time_dependent_variables[("Battery_in_flow", t)] <= battery_max_c_rate * Battery_capacity)
             model.Add(Time_dependent_variables[("Battery_out_flow", t)] <= battery_max_c_rate * Battery_capacity)
@@ -196,6 +211,14 @@ def setup(
 
 
     # starting conditions
+    if battery_max_c_rate is not None:
+        model.Add(Battery_power_capacity <= battery_max_c_rate * Battery_capacity)
+    else:
+        model.Add(
+            Battery_power_capacity
+            <= power_capacity_upper_bound * Battery_capacity / Battery_capacity_upper_bound
+        )
+
     if debug_infeasibility:
         s_soc_start = model.NumVar(0, inf, "slack_soc_start")
         s_soc_end = model.NumVar(0, inf, "slack_soc_end")
@@ -238,7 +261,10 @@ def setup(
         Time_dependent_variables[("Grid_flow", t)] * input_dict["electricity_price"][t] * timestep_hours
         for t in timesteps
     )
-    annualized_battery_cost_expr = CRF * battery_invest_cost * Battery_capacity
+    annualized_battery_cost_expr = CRF * (
+        battery_invest_cost * Battery_capacity
+        + battery_power_invest_cost * Battery_power_capacity
+    )
 
     # Calculate peak demand costs based on frequency
     peak_demand_cost_expr = 0
@@ -259,6 +285,7 @@ def setup(
 
     solution_handles = {
         "battery_capacity": Battery_capacity,
+        "battery_power_capacity": Battery_power_capacity,
         "opex": OPEX,
         "total_cost": Total_Cost,
         "annualized_battery_cost_expr": annualized_battery_cost_expr,
@@ -311,8 +338,14 @@ def summarize_solution(model, solution_handles):
     monthly_peaks = {k: v.solution_value() for k, v in solution_handles["monthly_peak_vars"].items()}
     sum_monthly = sum(monthly_peaks.values()) if monthly_peaks else 0
     curtailed_energy_kwh = sum(v.solution_value() for v in solution_handles["spill_flow_vars"]) * 0.25
+    battery_capacity_kwh = solution_handles["battery_capacity"].solution_value()
+    discharged_energy_kwh = sum(v.solution_value() for v in solution_handles["battery_out_flow_vars"]) * 0.25
+    equivalent_full_cycles = np.nan
+    if battery_capacity_kwh > 1e-9:
+        equivalent_full_cycles = discharged_energy_kwh / battery_capacity_kwh
     return {
-        "battery_capacity_kwh": solution_handles["battery_capacity"].solution_value(),
+        "battery_capacity_kwh": battery_capacity_kwh,
+        "battery_power_capacity_kw": solution_handles["battery_power_capacity"].solution_value(),
         "objective_total_cost": model.Objective().Value(),
         "opex": solution_handles["opex"].solution_value(),
         "import_cost": solution_handles["import_cost_expr"].solution_value(),
@@ -323,6 +356,8 @@ def summarize_solution(model, solution_handles):
         "monthly_peaks": monthly_peaks,
         "sum_monthly_peaks": sum_monthly,
         "curtailed_energy_kwh": curtailed_energy_kwh,
+        "discharged_energy_kwh": discharged_energy_kwh,
+        "equivalent_full_cycles": equivalent_full_cycles,
     }
 
 

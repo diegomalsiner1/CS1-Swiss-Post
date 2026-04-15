@@ -51,6 +51,7 @@ This project builds a 15-minute load/PV dataset, solves a linear optimization mo
 The optimization decides:
 
 - Battery capacity (`kWh`)
+- Battery power rating (`kW`)
 - Battery charging/discharging trajectory (`kW` per timestep)
 - Grid import (`kW` per timestep)
 - PV usage (`kW` per timestep)
@@ -128,11 +129,17 @@ Main knobs in `config.py`:
 - `battery_max_c_rate` (`1/h`) power-to-energy coupling for charge and discharge
 - `battery_min_soc_fraction` (`-`) minimum state of charge reserve
 - `eta_charge`, `eta_discharge`, `eta_self_discharge`
-- `invest_cost` (`CHF/kWh`)
-- `battery_replacement_year` (year index in the business plan)
+- `invest_cost_energy` (`CHF/kWh`) energy-capacity CAPEX
+- `invest_cost_power` (`CHF/kW`) power-rating CAPEX
+- `battery_cycle_life` (equivalent full cycles before replacement)
+- `battery_calendar_life_years` optional calendar-life cap
 - `battery_replacement_cost_fraction` (`-`) replacement CAPEX as share of initial CAPEX
 - `operation_and_maintenance` (`CHF`)
 - `interest_rate`, `lifetime` (for annualization)
+
+Backward compatibility:
+
+- older cached input dictionaries/results may still contain `Battery_invest_cost` or `battery_replacement_year`; the code still reads them as legacy fallbacks
 
 ## Model Formulation (Implemented)
 
@@ -148,6 +155,7 @@ Decision variables per timestep `t`:
 Global variable:
 
 - `Battery_capacity` with upper bound `Battery_max_capacity`
+- `Battery_power_capacity` with upper bound `max(Battery_max_inflow, Battery_max_outflow)`
 
 Core constraints:
 
@@ -165,6 +173,11 @@ Core constraints:
 - Optional C-rate coupling:
 	- `Battery_in_flow[t] <= battery_max_c_rate * Battery_capacity`
 	- `Battery_out_flow[t] <= battery_max_c_rate * Battery_capacity`
+- Power-rating coupling:
+	- `Battery_in_flow[t] <= Battery_power_capacity`
+	- `Battery_out_flow[t] <= Battery_power_capacity`
+	- if `battery_max_c_rate` is set: `Battery_power_capacity <= battery_max_c_rate * Battery_capacity`
+	- otherwise a fallback linear linkage keeps power rating at zero when energy capacity is zero
 - Cyclic SOC boundary:
 	- `SOC[0] = 0.5*Battery_capacity`
 	- `SOC[last] = 0.5*Battery_capacity`
@@ -177,7 +190,7 @@ MILP-only constraints:
 Objective terms:
 
 - `Import_Cost = sum(Grid_flow[t] * price[t] * 0.25)`
-- `Annualized_Battery_Cost = CRF(interest_rate, lifetime) * invest_cost * Battery_capacity`
+- `Annualized_Battery_Cost = CRF(interest_rate, lifetime) * (invest_cost_energy * Battery_capacity + invest_cost_power * Battery_power_capacity)`
 - `Peak_Demand_Cost = peak_shaving_cost_factor * yearly_peak` or monthly sum of peaks
 - `Total_Cost = Annualized_Battery_Cost + operation_and_maintenance + Import_Cost + Peak_Demand_Cost`
 
@@ -189,6 +202,8 @@ After optimization, the project computes:
 - No-battery baseline peak-demand cost (`no_battery_peak_demand_cost`)
 - No-battery total cost (`no_battery_total_cost`)
 - NPV, IRR, and payback from annual operating savings, with upfront CAPEX and optional replacement cashflow treated separately (`results_processing.py`)
+- CAPEX split into energy and power components in the exported comparison tables
+- Replacement timing is estimated from annual equivalent full cycles and `battery_cycle_life`, optionally capped by `battery_calendar_life_years`
 
 Financial cashflow table is exported as:
 

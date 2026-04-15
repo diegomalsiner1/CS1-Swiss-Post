@@ -16,6 +16,8 @@ DEBUG_INFEASIBILITY = False
 
 
 def get_runtime_parameters() -> dict:
+    invest_cost_energy = getattr(config, "invest_cost_energy", getattr(config, "invest_cost", 0.0))
+    invest_cost_power = getattr(config, "invest_cost_power", 0.0)
     return {
         "PV_max_capacity": config.PV_max_capacity,
         "Battery_max_inflow": config.Battery_max_inflow,
@@ -26,16 +28,18 @@ def get_runtime_parameters() -> dict:
         "Battery_eta_charge": config.eta_charge,
         "Battery_eta_discharge": config.eta_discharge,
         "Battery_eta_self_discharge": config.eta_self_discharge,
-        "Battery_invest_cost": config.invest_cost,
+        "Battery_energy_invest_cost": invest_cost_energy,
+        "Battery_power_invest_cost": invest_cost_power,
         "operation_and_maintenance": config.operation_and_maintenance,
         "interest_rate": config.interest_rate,
         "lifetime": config.lifetime,
         "battery_degrading": config.battery_degrading,
+        "battery_cycle_life": getattr(config, "battery_cycle_life", None),
+        "battery_calendar_life_years": getattr(config, "battery_calendar_life_years", None),
         "optimization_mode": config.optimization_mode,
         "peak_shaving_cost_factor": config.peak_shaving_cost_factor,
         "peak_shaving_frequency": config.peak_shaving_frequency,
         "surplus_handling": getattr(config, "surplus_handling", "curtail"),
-        "battery_replacement_year": getattr(config, "battery_replacement_year", None),
         "battery_replacement_cost_fraction": getattr(config, "battery_replacement_cost_fraction", 0.0),
     }
 
@@ -63,6 +67,7 @@ def save_run_artifacts(run_dir: Path, input_dict: dict, solution_summary: dict, 
         "runtime_seconds": runtime_s,
         "objective_total_cost": float(solution_summary["objective_total_cost"]),
         "battery_capacity_kwh": float(solution_summary["battery_capacity_kwh"]),
+        "battery_power_capacity_kw": float(solution_summary.get("battery_power_capacity_kw", 0.0)),
         "opex": float(solution_summary["opex"]),
         "import_cost": float(solution_summary["import_cost"]),
         "fixed_om_cost": float(solution_summary["fixed_om_cost"]),
@@ -210,7 +215,13 @@ def load_or_build_input_dict() -> dict:
 def run_battery_size_sensitivity(input_dict: dict, battery_sizes_kwh) -> pd.DataFrame:
     rows = []
     baseline_summary = opt.compute_no_battery_baseline(input_dict)
-    invest_cost_per_kwh = float(input_dict["parameters"].get("Battery_invest_cost", 0.0))
+    invest_cost_per_kwh = float(
+        input_dict["parameters"].get(
+            "Battery_energy_invest_cost",
+            input_dict["parameters"].get("Battery_invest_cost", 0.0),
+        )
+    )
+    invest_cost_per_kw = float(input_dict["parameters"].get("Battery_power_invest_cost", 0.0))
     interest_rate = float(input_dict["parameters"].get("interest_rate", 0.0))
     lifetime = int(input_dict["parameters"].get("lifetime", 1))
     if interest_rate == 0:
@@ -236,6 +247,7 @@ def run_battery_size_sensitivity(input_dict: dict, battery_sizes_kwh) -> pd.Data
                 {
                     "battery_size_kwh": 0.0,
                     "optimized_battery_capacity_kwh": 0.0,
+                    "optimized_battery_power_capacity_kw": 0.0,
                     "objective_total_cost": float(solution_summary["objective_total_cost"]),
                     "import_cost": float(solution_summary["import_cost"]),
                     "peak_demand_cost": float(solution_summary["peak_demand_cost"]),
@@ -271,10 +283,11 @@ def run_battery_size_sensitivity(input_dict: dict, battery_sizes_kwh) -> pd.Data
                 {
                     "battery_size_kwh": float(battery_size_kwh),
                     "optimized_battery_capacity_kwh": float(battery_size_kwh),
+                    "optimized_battery_power_capacity_kw": np.nan,
                     "objective_total_cost": np.nan,
                     "import_cost": np.nan,
                     "peak_demand_cost": np.nan,
-                    "annualized_battery_cost": float(battery_size_kwh) * invest_cost_per_kwh * crf,
+                    "annualized_battery_cost": np.nan,
                     "annual_savings": np.nan,
                     "npv": np.nan,
                     "irr": np.nan,
@@ -289,6 +302,7 @@ def run_battery_size_sensitivity(input_dict: dict, battery_sizes_kwh) -> pd.Data
             {
                 "battery_size_kwh": float(battery_size_kwh),
                 "optimized_battery_capacity_kwh": float(solution_summary["battery_capacity_kwh"]),
+                "optimized_battery_power_capacity_kw": float(solution_summary.get("battery_power_capacity_kw", np.nan)),
                 "objective_total_cost": float(solution_summary["objective_total_cost"]),
                 "import_cost": float(solution_summary["import_cost"]),
                 "peak_demand_cost": float(solution_summary["peak_demand_cost"]),
@@ -351,6 +365,7 @@ if run_battery_size_sensitivity_flag and battery_sensitivity_sizes_kwh:
 print("Optimization finished")
 print("Objective Total Cost", solution_summary["objective_total_cost"])
 print("Battery Capacity [kWh]", solution_summary["battery_capacity_kwh"])
+print("Battery Power Capacity [kW]", solution_summary.get("battery_power_capacity_kw", 0.0))
 print("OPEX", solution_summary["opex"])
 print("Import Cost", solution_summary["import_cost"])
 print("Fixed O&M Cost", solution_summary["fixed_om_cost"])
