@@ -237,6 +237,7 @@ Typical contents:
 - `results_summary.json` (core KPIs)
 - `timeseries_results.csv` (aligned timestep results)
 - `financial_cashflows.csv` (yearly financial cashflows)
+- `battery_size_sensitivity.csv` (if sensitivity is enabled)
 
 Processed input artifacts:
 
@@ -252,6 +253,9 @@ Processed input artifacts:
 - CBC output is enabled in solve phase, so terminal logs can be verbose.
 - `data_preprocessing.py` currently rewrites `config.py` at import time from an Excel sheet named `config`.
 - The repository contains two config workflows (`config.py` and `config_new.py` / `CONFIG_INPUTS`), while `main.py` currently uses `config.py`.
+- Sensitivity analysis can be enabled via `run_battery_size_sensitivity=True` in `config.py`.
+- If `battery_sensitivity_sizes_kwh` is left empty, the model now generates a default size grid around the optimized battery size automatically.
+- In `results_sheet.ipynb`, sensitivity plots use TAC (`objective_total_cost`) with NPV on a second axis; infeasible points are shown separately.
 
 ## Current Scope and Limitations
 

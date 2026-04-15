@@ -166,6 +166,7 @@ Common files:
 - `weekly_summary.csv`: weekly energy/cost/peak reductions
 - `peak_metrics.csv`, `top_peak_intervals.csv`
 - `battery_utilization_summary.csv`
+- `battery_size_sensitivity.csv`: battery size sweep results (when enabled)
 
 KPI interpretation notes:
 
@@ -173,6 +174,13 @@ KPI interpretation notes:
 - `no_battery_total_cost`: annual baseline cost without battery
 - `annual_savings`: operating savings used in financial postprocessing
 - `npv`, `irr`, `payback_years`: calculated in postprocessing, not embedded as MILP objective
+
+Sensitivity analysis notes:
+
+- Activate with `run_battery_size_sensitivity=True` in `config.py`.
+- If `battery_sensitivity_sizes_kwh` is empty, default size points are generated automatically around the optimized battery size.
+- Reporting in `results_sheet.ipynb` uses TAC (`objective_total_cost`) as primary sensitivity axis, with NPV on the secondary axis.
+- Infeasible size points are retained and highlighted separately in the sensitivity plot.
 
 ## Validation Checklist (Recommended Every Run)
 

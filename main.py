@@ -8,6 +8,7 @@ import config
 import time
 import optimization as opt
 import results_processing as rp
+import report_generation as report_gen
 
 ## Will be used to run the tool
 INPUT_DICT_PATH = Path("03-PROCESSED-DATA/input_dict.json")
@@ -319,6 +320,43 @@ def run_battery_size_sensitivity(input_dict: dict, battery_sizes_kwh) -> pd.Data
     return pd.DataFrame(rows)
 
 
+def build_default_sensitivity_sizes(input_dict: dict, optimized_capacity_kwh: float) -> list[float]:
+    """
+    Build a meaningful default sensitivity grid when user does not provide one.
+
+    Strategy:
+    - Always include baseline (0 kWh)
+    - Sample around optimized size (50%, 75%, 100%, 125%, 150%, 200%)
+    - Add a small-size point to show early economics
+    - Cap values at Battery_max_capacity
+    """
+    cap_max = float(input_dict["parameters"].get("Battery_max_capacity", 0.0))
+    if cap_max <= 0:
+        return [0.0]
+
+    optimized_capacity_kwh = float(max(0.0, optimized_capacity_kwh))
+    if optimized_capacity_kwh < 1e-6:
+        # If optimized is ~0, use a broad low-to-high scan.
+        fractions = [0.0, 0.1, 0.25, 0.5, 0.75, 1.0]
+        sizes = [cap_max * f for f in fractions]
+    else:
+        sizes = [
+            0.0,
+            min(cap_max, optimized_capacity_kwh * 0.5),
+            min(cap_max, optimized_capacity_kwh * 0.75),
+            min(cap_max, optimized_capacity_kwh),
+            min(cap_max, optimized_capacity_kwh * 1.25),
+            min(cap_max, optimized_capacity_kwh * 1.5),
+            min(cap_max, optimized_capacity_kwh * 2.0),
+        ]
+        # Add one low absolute size point for better curve visibility.
+        sizes.append(min(cap_max, max(100.0, optimized_capacity_kwh * 0.25)))
+
+    # Unique, sorted, rounded for cleaner exports.
+    sizes = sorted({round(float(s), 3) for s in sizes if s >= 0})
+    return sizes
+
+
 input_dict = load_or_build_input_dict()
 run_dir = create_run_output_dir(input_dict)
 run_start = time.perf_counter()
@@ -361,6 +399,35 @@ if run_battery_size_sensitivity_flag and battery_sensitivity_sizes_kwh:
     sensitivity_df = run_battery_size_sensitivity(input_dict, battery_sensitivity_sizes_kwh)
     sensitivity_df.to_csv(run_dir / "battery_size_sensitivity.csv", index=False)
     print("Saved battery size sensitivity to", run_dir / "battery_size_sensitivity.csv")
+elif run_battery_size_sensitivity_flag:
+    auto_sizes = build_default_sensitivity_sizes(
+        input_dict,
+        solution_summary.get("battery_capacity_kwh", 0.0),
+    )
+    print(
+        "No explicit battery_sensitivity_sizes_kwh provided. "
+        f"Using default sizes: {auto_sizes}"
+    )
+    sensitivity_df = run_battery_size_sensitivity(input_dict, auto_sizes)
+    sensitivity_df.to_csv(run_dir / "battery_size_sensitivity.csv", index=False)
+    print("Saved battery size sensitivity to", run_dir / "battery_size_sensitivity.csv")
+
+if getattr(config, "generate_pdf_report", True):
+    settings_snapshot = {
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "debug_infeasibility": DEBUG_INFEASIBILITY,
+        "load_existing_input_dict": config.load_existing_input_dict,
+        "max_timesteps": config.max_timesteps,
+        "timesteps_used": len(input_dict.get("total_demand", [])),
+        "parameters": input_dict.get("parameters", {}),
+    }
+    report_path = report_gen.generate_pdf_report(
+        run_dir=run_dir,
+        solution_summary=solution_summary,
+        settings_snapshot=settings_snapshot,
+        input_dict=input_dict,
+    )
+    print("Saved PDF report to", report_path)
 
 print("Optimization finished")
 print("Objective Total Cost", solution_summary["objective_total_cost"])

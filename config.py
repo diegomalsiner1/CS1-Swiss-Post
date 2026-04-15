@@ -25,3 +25,9 @@ battery_replacement_cost_fraction = 0.7
 peak_shaving_cost_factor = 10
 peak_shaving_frequency = "yearly"
 operation_and_maintenance = 10000
+
+# Sensitivity analysis (battery size sweep)
+run_battery_size_sensitivity = True
+# Leave empty to use model-driven defaults around the optimized size.
+battery_sensitivity_sizes_kwh = []
+generate_pdf_report = True
