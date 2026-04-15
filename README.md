@@ -250,6 +250,8 @@ Processed input artifacts:
 - `max_timesteps` can speed up debugging and test runs.
 - Preprocessing uses GUI sheet/file dialogs; this is not headless-server friendly.
 - CBC output is enabled in solve phase, so terminal logs can be verbose.
+- `data_preprocessing.py` currently rewrites `config.py` at import time from an Excel sheet named `config`.
+- The repository contains two config workflows (`config.py` and `config_new.py` / `CONFIG_INPUTS`), while `main.py` currently uses `config.py`.
 
 ## Current Scope and Limitations
 

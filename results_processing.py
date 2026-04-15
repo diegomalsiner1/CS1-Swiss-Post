@@ -426,6 +426,61 @@ def build_monthly_summary_table(timestamps, baseline_grid_import, optimized_grid
     ]
 
 
+def build_weekly_summary_table(timestamps, baseline_grid_import, optimized_grid_import, electricity_price):
+    weekly_df = pd.DataFrame({
+        "timestamp": pd.to_datetime(list(timestamps)),
+        "baseline_grid_import": np.asarray(baseline_grid_import, dtype=float),
+        "optimized_grid_import": np.asarray(optimized_grid_import, dtype=float),
+        "electricity_price": np.asarray(electricity_price, dtype=float),
+    })
+    weekly_df["week_start"] = weekly_df["timestamp"].dt.to_period("W-MON").apply(lambda p: p.start_time.date().isoformat())
+    timestep_hours = 0.25
+    weekly_df["baseline_import_energy_kwh"] = weekly_df["baseline_grid_import"] * timestep_hours
+    weekly_df["optimized_import_energy_kwh"] = weekly_df["optimized_grid_import"] * timestep_hours
+    weekly_df["baseline_import_cost"] = (
+        weekly_df["baseline_grid_import"] * weekly_df["electricity_price"] * timestep_hours
+    )
+    weekly_df["optimized_import_cost"] = (
+        weekly_df["optimized_grid_import"] * weekly_df["electricity_price"] * timestep_hours
+    )
+
+    summary_df = (
+        weekly_df.groupby("week_start", as_index=False)
+        .agg(
+            weekly_import_energy_before_kwh=("baseline_import_energy_kwh", "sum"),
+            weekly_import_energy_after_kwh=("optimized_import_energy_kwh", "sum"),
+            weekly_import_cost_before=("baseline_import_cost", "sum"),
+            weekly_import_cost_after=("optimized_import_cost", "sum"),
+            weekly_peak_before=("baseline_grid_import", "max"),
+            weekly_peak_after=("optimized_grid_import", "max"),
+        )
+    )
+    summary_df["weekly_energy_savings_kwh"] = (
+        summary_df["weekly_import_energy_before_kwh"] - summary_df["weekly_import_energy_after_kwh"]
+    )
+    summary_df["weekly_cost_savings"] = (
+        summary_df["weekly_import_cost_before"] - summary_df["weekly_import_cost_after"]
+    )
+    summary_df["weekly_peak_reduction"] = (
+        summary_df["weekly_peak_before"] - summary_df["weekly_peak_after"]
+    )
+
+    return summary_df[
+        [
+            "week_start",
+            "weekly_import_energy_before_kwh",
+            "weekly_import_energy_after_kwh",
+            "weekly_energy_savings_kwh",
+            "weekly_import_cost_before",
+            "weekly_import_cost_after",
+            "weekly_cost_savings",
+            "weekly_peak_before",
+            "weekly_peak_after",
+            "weekly_peak_reduction",
+        ]
+    ]
+
+
 def build_battery_utilization_table(solution_summary, battery_soc, battery_charge_power, battery_discharge_power):
     timestep_hours = 0.25
     battery_soc = np.asarray(battery_soc, dtype=float)
@@ -546,6 +601,7 @@ def export_results(
     peak_metrics_path = None
     top_peak_path = None
     monthly_summary_path = None
+    weekly_summary_path = None
     battery_utilization_path = None
     if "timestamp" in ts_df.columns and "baseline_grid_import" in ts_df.columns and "grid_flow" in ts_df.columns:
         peak_metrics_df, top_peak_intervals_df = build_peak_metrics_tables(
@@ -566,6 +622,14 @@ def export_results(
             )
             monthly_summary_path = run_dir / "monthly_summary.csv"
             monthly_summary_df.to_csv(monthly_summary_path, index=False)
+            weekly_summary_df = build_weekly_summary_table(
+                ts_df["timestamp"],
+                ts_df["baseline_grid_import"],
+                ts_df["grid_flow"],
+                input_dict["electricity_price"][:min_len],
+            )
+            weekly_summary_path = run_dir / "weekly_summary.csv"
+            weekly_summary_df.to_csv(weekly_summary_path, index=False)
     if (
         "battery_soc" in ts_df.columns
         and "battery_charge_power" in ts_df.columns
@@ -590,5 +654,6 @@ def export_results(
         "peak_metrics_path": str(peak_metrics_path) if peak_metrics_path is not None else None,
         "top_peak_intervals_path": str(top_peak_path) if top_peak_path is not None else None,
         "monthly_summary_path": str(monthly_summary_path) if monthly_summary_path is not None else None,
+        "weekly_summary_path": str(weekly_summary_path) if weekly_summary_path is not None else None,
         "battery_utilization_path": str(battery_utilization_path) if battery_utilization_path is not None else None,
     }
