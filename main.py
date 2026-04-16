@@ -17,32 +17,39 @@ DEBUG_INFEASIBILITY = False
 
 
 def get_runtime_parameters() -> dict:
-    invest_cost_energy = getattr(config, "invest_cost_energy", getattr(config, "invest_cost", 0.0))
-    invest_cost_power = getattr(config, "invest_cost_power", 0.0)
     return {
-        "PV_max_capacity": config.PV_max_capacity,
-        "Battery_max_inflow": config.Battery_max_inflow,
-        "Battery_max_outflow": config.Battery_max_outflow,
-        "Battery_max_capacity": config.Battery_max_capacity,
-        "battery_max_c_rate": getattr(config, "battery_max_c_rate", None),
-        "battery_min_soc_fraction": getattr(config, "battery_min_soc_fraction", 0.0),
-        "Battery_eta_charge": config.eta_charge,
-        "Battery_eta_discharge": config.eta_discharge,
-        "Battery_eta_self_discharge": config.eta_self_discharge,
-        "Battery_energy_invest_cost": invest_cost_energy,
-        "Battery_power_invest_cost": invest_cost_power,
-        "operation_and_maintenance": config.operation_and_maintenance,
-        "interest_rate": config.interest_rate,
-        "lifetime": config.lifetime,
-        "battery_degrading": config.battery_degrading,
-        "battery_cycle_life": getattr(config, "battery_cycle_life", None),
-        "battery_calendar_life_years": getattr(config, "battery_calendar_life_years", None),
-        "optimization_mode": config.optimization_mode,
-        "peak_shaving_cost_factor": config.peak_shaving_cost_factor,
-        "peak_shaving_frequency": config.peak_shaving_frequency,
-        "surplus_handling": getattr(config, "surplus_handling", "curtail"),
-        "battery_replacement_cost_fraction": getattr(config, "battery_replacement_cost_fraction", 0.0),
-    }
+            # --- Standard Parameters ---
+            "PV_max_capacity": config.PV_max_capacity,
+            "Battery_max_inflow": config.Battery_max_inflow,
+            "Battery_max_outflow": config.Battery_max_outflow,
+            "Battery_max_capacity": config.Battery_max_capacity,
+            "Battery_eta_charge": config.eta_charge,
+            "Battery_eta_discharge": config.eta_discharge,
+            "Battery_eta_self_discharge": config.eta_self_discharge,
+            "operation_and_maintenance": config.operation_and_maintenance,
+            "interest_rate": config.interest_rate,
+            "lifetime": config.lifetime,
+            "battery_degrading": config.battery_degrading,
+            "optimization_mode": config.optimization_mode,
+            "peak_shaving_cost_factor": config.peak_shaving_cost_factor,
+            "peak_shaving_frequency": config.peak_shaving_frequency,
+
+            # Advanced Parameters ---
+            # Using getattr to safely handle new Excel columns or config variables
+            "Battery_invest_cost": getattr(config, "invest_cost", 0.0),
+            "Battery_energy_invest_cost": getattr(config, "invest_cost_energy", getattr(config, "invest_cost", 0.0)),
+            "Battery_power_invest_cost": getattr(config, "invest_cost_power", 0.0),
+            "battery_max_c_rate": getattr(config, "battery_max_c_rate", None),
+            "battery_min_soc_fraction": getattr(config, "battery_min_soc_fraction", 0.0),
+            "battery_cycle_life": getattr(config, "battery_cycle_life", None),
+            "battery_calendar_life_years": getattr(config, "battery_calendar_life_years", None),
+            "surplus_handling": getattr(config, "surplus_handling", "curtail"),
+            "battery_replacement_cost_fraction": getattr(config, "battery_replacement_cost_fraction", 0.0),
+            # Parameters for sensitivity and report
+            "run_battery_size_sensitivity": getattr(config, "run_battery_size_sensitivity", False),
+            "battery_sensitivity_sizes_kwh": getattr(config, "battery_sensitivity_sizes_kwh", []),
+            "generate_pdf_report": getattr(config, "generate_pdf_report", False),
+        }
 
 def create_run_output_dir(input_dict: dict) -> Path:
     mode = input_dict.get("parameters", {}).get("optimization_mode", "unknown")

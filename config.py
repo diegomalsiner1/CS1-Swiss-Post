@@ -20,14 +20,11 @@ invest_cost_energy = 250
 invest_cost_power = 120
 battery_degrading = 0.01
 battery_cycle_life = 6000
-battery_calendar_life_years = 15
-battery_replacement_cost_fraction = 0.7
-peak_shaving_cost_factor = 10
+battery_calendar_life_years = 10
+battery_replacement__cost_fraction = 1
+peak_shaving_cost_factor = 19.2
 peak_shaving_frequency = "yearly"
 operation_and_maintenance = 10000
-
-# Sensitivity analysis (battery size sweep)
 run_battery_size_sensitivity = True
-# Leave empty to use model-driven defaults around the optimized size.
-battery_sensitivity_sizes_kwh = []
+battery_sensitivity_sizes_kwh = None
 generate_pdf_report = True
