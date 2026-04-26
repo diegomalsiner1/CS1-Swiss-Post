@@ -1,7 +1,25 @@
+# Virtual environments
 venv/
+.venv/
+env/
+
+# IDE/editor settings
 .vscode/
+
+# OS files
 .DS_Store
+01-INPUT-DATA/.DS_Store
+
+# Python caches and temp artifacts
 __pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Matplotlib local cache (created during report generation)
+.matplotlib-cache/
+
+# Build/runtime output folders
 02-MODEL-RESULTS/*
 !02-MODEL-RESULTS/.gitkeep
-01-INPUT-DATA/.DS_Store
