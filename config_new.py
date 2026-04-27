@@ -19,16 +19,21 @@ def _default_parameters() -> dict:
         "load_existing_input_dict": False,
         "max_timesteps": max_steps,
         "optimization_mode": "lp",
+        "surplus_handling": "curtail",
         "PV_max_capacity": 10000,
         "Battery_max_inflow": 1000,
         "Battery_max_outflow": 1000,
         "Battery_max_capacity": 100000,
+        "battery_max_c_rate": 0.5,
+        "battery_min_soc_fraction": 0.2,
         "eta_charge": 0.9,
         "eta_discharge": 0.95,
         "eta_self_discharge": 0.0,
-        "invest_cost": 450.0,
+        "invest_cost": 250.0,
         "operation_and_maintenance": 10000 * (max_steps / (24 * 4 * 365)),
         "battery_degrading": 0.01,
+        "battery_replacement_year": 10,
+        "battery_replacement_cost_fraction": 0.7,
         "peak_shaving_cost_factor": 10.0,
         "peak_shaving_granularity": "monthly", ## either "yearly" or "monthly"
     }
@@ -159,16 +164,21 @@ year = _cfg["year"]
 load_existing_input_dict = _cfg["load_existing_input_dict"]
 max_timesteps = _cfg["max_timesteps"]
 optimization_mode = _cfg["optimization_mode"]
+surplus_handling = _cfg["surplus_handling"]
 
 PV_max_capacity = _cfg["PV_max_capacity"]
 Battery_max_inflow = _cfg["Battery_max_inflow"]
 Battery_max_outflow = _cfg["Battery_max_outflow"]
 Battery_max_capacity = _cfg["Battery_max_capacity"]
+battery_max_c_rate = _cfg["battery_max_c_rate"]
+battery_min_soc_fraction = _cfg["battery_min_soc_fraction"]
 eta_charge = _cfg["eta_charge"]
 eta_discharge = _cfg["eta_discharge"]
 eta_self_discharge = _cfg["eta_self_discharge"]
 invest_cost = _cfg["invest_cost"]
 operation_and_maintenance = _cfg["operation_and_maintenance"]
 battery_degrading = _cfg["battery_degrading"]
+battery_replacement_year = _cfg["battery_replacement_year"]
+battery_replacement_cost_fraction = _cfg["battery_replacement_cost_fraction"]
 peak_shaving_cost_factor = _cfg["peak_shaving_cost_factor"]
 peak_shaving_granularity = _cfg["peak_shaving_granularity"]
