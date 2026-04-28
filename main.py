@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 from functools import reduce
 import json
+import importlib
 from datetime import datetime
 from pathlib import Path
 import config
@@ -363,6 +364,10 @@ def build_default_sensitivity_sizes(input_dict: dict, optimized_capacity_kwh: fl
     sizes = sorted({round(float(s), 3) for s in sizes if s >= 0})
     return sizes
 
+
+import data_preprocessing as _dpp
+_dpp.refresh_config_from_excel()
+importlib.reload(config)
 
 input_dict = load_or_build_input_dict()
 run_dir = create_run_output_dir(input_dict)
