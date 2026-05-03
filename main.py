@@ -178,9 +178,10 @@ def build_input_dict_from_raw_data() -> dict:
     PV_max = config.PV_max_capacity
     merged_df["PV_capacity_factor"] = (merged_df["PV_kW"] / PV_max).clip(lower=0, upper=1)
 
-    # Constant price profile (CHF/kWh)
-    price_chf_per_kwh = 0.30
-    merged_df["electricity_price"] = price_chf_per_kwh
+    # Dynamic price profile from ENTSO-E day-ahead spot prices (CHF/kWh)
+    price_df = dpp.load_price_curve(year=year)
+    merged_df = merged_df.merge(price_df, on="timestamp", how="left")
+    merged_df["electricity_price"] = merged_df["electricity_price"].ffill().bfill()
 
     return {
         "parameters": get_runtime_parameters(),
