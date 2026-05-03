@@ -1,4 +1,5 @@
 import calendar
+from pathlib import Path
 import pandas as pd
 import numpy as np
 import tkinter as tk
@@ -590,4 +591,56 @@ def generate_zustellung_profile(file_path=None, year=None, sheet_name=None):
     result = result[["timestamp", "zustellung_kW"]]
 
     return result
+
+
+# ==========================================================
+# Energy price curve
+# ==========================================================
+
+# 2025 average EUR/CHF rate. Update if using a different year or rate.
+_EUR_TO_CHF = 0.94
+
+def load_price_curve(year: int) -> pd.DataFrame:
+    """
+    Load ENTSO-E day-ahead spot prices from GUI_ENERGY_PRICES.csv, convert to
+    CHF/kWh, and resample from hourly to 15-min resolution.
+
+    Resampling uses forward-fill because spot prices are step functions:
+    the price quoted for 00:00-01:00 applies equally to 00:15, 00:30, 00:45.
+
+    Returns a DataFrame with columns [timestamp, electricity_price].
+    """
+    price_csv = Path("01-INPUT-DATA/GUI_ENERGY_PRICES.csv")
+    if not price_csv.exists():
+        raise FileNotFoundError(
+            f"Energy price file not found at {price_csv.resolve()}. "
+            "Place GUI_ENERGY_PRICES.csv in 01-INPUT-DATA/."
+        )
+
+    df = pd.read_csv(price_csv)
+
+    # Parse only the start timestamp from "DD/MM/YYYY HH:MM:SS - DD/MM/YYYY HH:MM:SS"
+    df["timestamp"] = pd.to_datetime(
+        df["MTU (CET/CEST)"].str.split(" - ").str[0].str.strip(),
+        format="%d/%m/%Y %H:%M:%S"
+    )
+
+    # EUR/MWh → CHF/kWh: divide by 1000 (unit), multiply by exchange rate
+    df["electricity_price"] = (
+        pd.to_numeric(df["Day-ahead Price (EUR/MWh)"], errors="coerce")
+        * _EUR_TO_CHF
+        / 1000
+    )
+
+    df = df[["timestamp", "electricity_price"]].set_index("timestamp")
+
+    # Upsample to 15-min by forward-fill
+    full_index = pd.date_range(
+        start=pd.Timestamp(f"{year}-01-01"),
+        end=pd.Timestamp(f"{year}-12-31 23:45"),
+        freq="15min"
+    )
+    df = df.reindex(full_index).ffill().bfill()
+
+    return df.reset_index().rename(columns={"index": "timestamp"})
 
