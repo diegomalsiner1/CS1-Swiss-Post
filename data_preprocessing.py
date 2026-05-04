@@ -337,6 +337,9 @@ def load_trafo(sheet_name):
     # Detect avg column automatically
     avg_columns = [col for col in df.columns if "-avg[W]" in col]
     if not avg_columns:
+        avg_columns = [col*4/1000 for col in df.columns if "-avg[kWh]" in col] 
+    ### Hardcoded for kWh in 15 min interval 
+    if not avg_columns:
         raise ValueError(f"No avg column found in sheet {sheet_name}")
     avg_column = avg_columns[0]
 
