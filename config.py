@@ -1,5 +1,6 @@
 # Auto-generated from Excel - DO NOT EDIT MANUALLY
 
+use_case = "Peak_Shaving"
 interest_rate = 0.06
 lifetime = 30
 load_existing_input_dict = True
@@ -20,11 +21,10 @@ invest_cost_power = 120
 battery_degrading = 0.01
 battery_cycle_life = 6000
 battery_calendar_life_years = 15
-battery_replacement_cost_fraction = 1
+battery_replacement__cost_fraction = 1
 peak_shaving_cost_factor = 19.2
 peak_shaving_frequency = "yearly"
 operation_and_maintenance = 100
-grid_fees = 0.05
-run_battery_size_sensitivity = 1
+run_battery_size_sensitivity = False
 battery_sensitivity_sizes_kwh = None
 generate_pdf_report = True
