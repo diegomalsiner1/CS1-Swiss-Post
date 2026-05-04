@@ -79,6 +79,7 @@ def save_run_artifacts(run_dir: Path, input_dict: dict, solution_summary: dict, 
         "battery_power_capacity_kw": float(solution_summary.get("battery_power_capacity_kw", 0.0)),
         "opex": float(solution_summary["opex"]),
         "import_cost": float(solution_summary["import_cost"]),
+        "export_revenue": float(solution_summary.get("export_revenue", 0.0)),
         "fixed_om_cost": float(solution_summary["fixed_om_cost"]),
         "annualized_battery_cost": float(solution_summary["annualized_battery_cost"]),
         "peak_demand_cost": float(solution_summary.get("peak_demand_cost", 0.0)),
@@ -114,7 +115,7 @@ def apply_timestep_cap(input_dict: dict, max_timesteps) -> dict:
     if not isinstance(max_timesteps, int) or max_timesteps <= 0:
         raise ValueError("config.max_timesteps must be a positive integer or None")
 
-    series_keys = ["timestamps", "total_demand", "PV_capacity_factor", "electricity_price"]
+    series_keys = ["timestamps", "total_demand", "PV_capacity_factor", "electricity_price", "electricity_selling_price"]
     available_lengths = [len(input_dict[k]) for k in series_keys if k in input_dict]
     if not available_lengths:
         return input_dict
@@ -182,13 +183,15 @@ def build_input_dict_from_raw_data() -> dict:
     price_df = dpp.load_price_curve(year=year)
     merged_df = merged_df.merge(price_df, on="timestamp", how="left")
     merged_df["electricity_price"] = merged_df["electricity_price"].ffill().bfill()
+    merged_df["electricity_selling_price"] = (merged_df["electricity_price"] - config.grid_fees).tolist()
 
     return {
         "parameters": get_runtime_parameters(),
         "timestamps": merged_df["timestamp"].astype(str).tolist(),
         "total_demand": merged_df["total_demand"].tolist(),
         "PV_capacity_factor": merged_df["PV_capacity_factor"].tolist(),
-        "electricity_price": merged_df["electricity_price"].tolist()
+        "electricity_price": merged_df["electricity_price"].tolist(),
+        "electricity_selling_price": merged_df["electricity_selling_price"].tolist(),
     }
 
 
@@ -203,6 +206,8 @@ def load_or_build_input_dict() -> dict:
             print(f"Loading input dictionary from {INPUT_DICT_PATH}")
             input_dict = json.load(f)
         input_dict["parameters"] = get_runtime_parameters()
+        if "electricity_price" in input_dict and "electricity_selling_price" not in input_dict:
+            input_dict["electricity_selling_price"] = [float(p) - config.grid_fees for p in input_dict["electricity_price"]]
 
         steps_before = len(input_dict.get("total_demand", []))
         input_dict = apply_timestep_cap(input_dict, config.max_timesteps)
@@ -448,6 +453,7 @@ print("Battery Capacity [kWh]", solution_summary["battery_capacity_kwh"])
 print("Battery Power Capacity [kW]", solution_summary.get("battery_power_capacity_kw", 0.0))
 print("OPEX", solution_summary["opex"])
 print("Import Cost", solution_summary["import_cost"])
+print("Export Revenue", solution_summary.get("export_revenue", 0.0))
 print("Fixed O&M Cost", solution_summary["fixed_om_cost"])
 peak_type = input_dict["parameters"].get("peak_shaving_granularity", input_dict["parameters"].get("peak_shaving_frequency", "yearly"))
 print("Peak Demand Type and Cost", peak_type, solution_summary["peak_demand_cost"])

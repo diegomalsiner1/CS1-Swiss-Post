@@ -29,10 +29,12 @@ def setup(
         )
 
     # Basic input consistency checks
-    if "total_demand" not in input_dict or "PV_capacity_factor" not in input_dict or "electricity_price" not in input_dict:
-        raise ValueError("input_dict must contain total_demand, PV_capacity_factor, and electricity_price time series")
+    required_series = ["total_demand", "PV_capacity_factor", "electricity_price", "electricity_selling_price"]
+    missing = [key for key in required_series if key not in input_dict]
+    if missing:
+        raise ValueError(f"input_dict must contain the following time series: {', '.join(required_series)}")
     n = len(input_dict["total_demand"])
-    if not (len(input_dict["PV_capacity_factor"]) == n and len(input_dict["electricity_price"]) == n):
+    if not all(len(input_dict[key]) == n for key in required_series):
         raise ValueError("Time series lengths in input_dict must match")
 
     ## Defining the required constants
@@ -117,7 +119,8 @@ def setup(
     battery_level_vars = []
     battery_in_flow_vars = []
     battery_out_flow_vars = []
-    grid_flow_vars = []
+    grid_import_vars = []
+    grid_export_vars = []
     pv_out_flow_vars = []
     spill_flow_vars = []
 
@@ -125,7 +128,8 @@ def setup(
         # Integer Variables
         Time_dependent_variables[("Battery_in_flow",t)] = model.NumVar(0, Battery_max_inflow, f"Powerflow_Batter_in_{t}")
         Time_dependent_variables[("Battery_out_flow",t)] = model.NumVar(0, Battery_max_outflow, f"Powerflow_Batter_out_{t}")
-        Time_dependent_variables[("Grid_flow",t)] = model.NumVar(0, inf, f"Powerflow_Grid_{t}")
+        Time_dependent_variables[("Grid_import",t)] = model.NumVar(0, inf, f"Powerflow_Grid_Import_{t}")
+        Time_dependent_variables[("Grid_export",t)] = model.NumVar(0, inf, f"Powerflow_Grid_Export_{t}")
         Time_dependent_variables[("Battery_level",t)] = model.NumVar(0, Battery_capacity_upper_bound, f"Battery_Level_{t}")
         Time_dependent_variables[("PV_out_flow",t)] = model.NumVar(0, PV_max_capacity, f"PV_Powerflow_out_{t}")
         Time_dependent_variables[("Spill_flow",t)] = model.NumVar(0, PV_max_capacity, f"Powerflow_Spill_{t}")
@@ -133,7 +137,8 @@ def setup(
         battery_in_flow_vars.append(Time_dependent_variables[("Battery_in_flow", t)])
         battery_out_flow_vars.append(Time_dependent_variables[("Battery_out_flow", t)])
         battery_level_vars.append(Time_dependent_variables[("Battery_level", t)])
-        grid_flow_vars.append(Time_dependent_variables[("Grid_flow", t)])
+        grid_import_vars.append(Time_dependent_variables[("Grid_import", t)])
+        grid_export_vars.append(Time_dependent_variables[("Grid_export", t)])
         pv_out_flow_vars.append(Time_dependent_variables[("PV_out_flow", t)])
         spill_flow_vars.append(Time_dependent_variables[("Spill_flow", t)])
 
@@ -147,10 +152,11 @@ def setup(
     for t in tqdm(timesteps):
         # Power Flow Balance
         power_balance_expr = (
-            Time_dependent_variables[("Grid_flow", t)]
+            Time_dependent_variables[("Grid_import", t)]
             + Time_dependent_variables[("PV_out_flow", t)]
             + Time_dependent_variables[("Battery_out_flow", t)]
             - Time_dependent_variables[("Battery_in_flow", t)]
+            - Time_dependent_variables[("Grid_export", t)]
         )
         demand_t = input_dict["total_demand"][t]
         if debug_infeasibility:
@@ -193,6 +199,10 @@ def setup(
             model.Add(Time_dependent_variables[("Battery_out_flow", t)] <= battery_max_c_rate * Battery_capacity)
         model.Add(Time_dependent_variables[("Battery_level", t)] <= Battery_capacity)
         model.Add(Time_dependent_variables[("Battery_level", t)] >= min_soc_fraction * Battery_capacity)
+        model.Add(
+            Time_dependent_variables[("Grid_export", t)]
+            <= Time_dependent_variables[("PV_out_flow", t)] + Time_dependent_variables[("Battery_out_flow", t)]
+        )
         if t != timesteps[-1]:
             # Equation to calculate the battery level in the next time step t+1 based on the current time step t
             soc_next_expr = (
@@ -237,7 +247,7 @@ def setup(
         if peak_shaving_frequency == "yearly":
             # Peak grid flow for the entire year
             for t in timesteps:
-                model.Add(Peak_grid_flow >= Time_dependent_variables[("Grid_flow", t)])
+                model.Add(Peak_grid_flow >= Time_dependent_variables[("Grid_import", t)])
         else:  # monthly
             # Create peak variables for each month
             timestamps = pd.to_datetime(input_dict["timestamps"])
@@ -254,11 +264,15 @@ def setup(
                 peak_var = model.NumVar(0, inf, f"Peak_Grid_Flow_{month}")
                 monthly_peak_vars[month] = peak_var
                 for idx in month_indices:
-                    model.Add(peak_var >= Time_dependent_variables[("Grid_flow", idx)])
+                    model.Add(peak_var >= Time_dependent_variables[("Grid_import", idx)])
 
     timestep_hours = 0.25
     import_cost_expr = sum(
-        Time_dependent_variables[("Grid_flow", t)] * input_dict["electricity_price"][t] * timestep_hours
+        Time_dependent_variables[("Grid_import", t)] * input_dict["electricity_price"][t] * timestep_hours
+        for t in timesteps
+    )
+    export_revenue_expr = sum(
+        Time_dependent_variables[("Grid_export", t)] * input_dict["electricity_selling_price"][t] * timestep_hours
         for t in timesteps
     )
     annualized_battery_cost_expr = CRF * (
@@ -278,7 +292,7 @@ def setup(
     if debug_infeasibility:
         model.Minimize(sum(slacks))
     else:
-        opex_expr = cost_operation_and_maintenance + import_cost_expr
+        opex_expr = cost_operation_and_maintenance + import_cost_expr - export_revenue_expr
         model.Add(OPEX == opex_expr)
         model.Add(Total_Cost == annualized_battery_cost_expr + OPEX + peak_demand_cost_expr)
         model.Minimize(Total_Cost)
@@ -290,12 +304,15 @@ def setup(
         "total_cost": Total_Cost,
         "annualized_battery_cost_expr": annualized_battery_cost_expr,
         "import_cost_expr": import_cost_expr,
+        "export_revenue_expr": export_revenue_expr,
         "fixed_om_cost": cost_operation_and_maintenance,
         "peak_demand_cost_expr": peak_demand_cost_expr,
         "battery_level_vars": battery_level_vars,
         "battery_in_flow_vars": battery_in_flow_vars,
         "battery_out_flow_vars": battery_out_flow_vars,
-        "grid_flow_vars": grid_flow_vars,
+        "grid_import_vars": grid_import_vars,
+        "grid_export_vars": grid_export_vars,
+        "grid_flow_vars": grid_import_vars,
         "pv_out_flow_vars": pv_out_flow_vars,
         "spill_flow_vars": spill_flow_vars,
         "yearly_peak_var": Peak_grid_flow,
@@ -349,6 +366,7 @@ def summarize_solution(model, solution_handles):
         "objective_total_cost": model.Objective().Value(),
         "opex": solution_handles["opex"].solution_value(),
         "import_cost": solution_handles["import_cost_expr"].solution_value(),
+        "export_revenue": solution_handles["export_revenue_expr"].solution_value(),
         "fixed_om_cost": solution_handles["fixed_om_cost"],
         "annualized_battery_cost": solution_handles["annualized_battery_cost_expr"].solution_value(),
         "peak_demand_cost": solution_handles["peak_demand_cost_expr"].solution_value(),
