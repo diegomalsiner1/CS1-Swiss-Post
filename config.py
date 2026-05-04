@@ -2,7 +2,7 @@
 
 interest_rate = 0.06
 lifetime = 30
-load_existing_input_dict = True
+load_existing_input_dict = False
 max_timesteps = None
 optimization_mode = "lp"
 surplus_handling = "curtail"
@@ -25,6 +25,9 @@ peak_shaving_cost_factor = 19.2
 peak_shaving_frequency = "yearly"
 operation_and_maintenance = 100
 grid_fees = 0.05
-run_battery_size_sensitivity = False
+run_battery_size_sensitivity = True
 battery_sensitivity_sizes_kwh = None
 generate_pdf_report = True
+exchange_rate = 0.94
+use_constant_import_price = False
+import_price = 0.18

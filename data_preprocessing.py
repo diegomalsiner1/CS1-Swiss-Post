@@ -7,6 +7,7 @@ import re
 from tkinter import filedialog
 from datetime import datetime, time
 from openpyxl import load_workbook
+import config # Import the config module
 
 ## Will be used to process the input data before feeding the data into the optimization framework
 
@@ -597,9 +598,6 @@ def generate_zustellung_profile(file_path=None, year=None, sheet_name=None):
 # Energy price curve
 # ==========================================================
 
-# 2025 average EUR/CHF rate. Update if using a different year or rate.
-_EUR_TO_CHF = 0.94
-
 def load_price_curve(year: int) -> pd.DataFrame:
     """
     Load ENTSO-E day-ahead spot prices from GUI_ENERGY_PRICES.csv, convert to
@@ -617,22 +615,38 @@ def load_price_curve(year: int) -> pd.DataFrame:
             "Place GUI_ENERGY_PRICES.csv in 01-INPUT-DATA/."
         )
 
+    # Check if a constant import price should be used
+    if getattr(config, "use_constant_import_price", False):
+        constant_price = getattr(config, "import_price", 0.0)
+        
+        start_date = pd.Timestamp(f"{year}-01-01 00:00:00")
+        end_date = pd.Timestamp(f"{year}-12-31 23:45:00")
+        full_index = pd.date_range(start=start_date, end=end_date, freq="15min")
+        
+        df_constant_price = pd.DataFrame({
+            "timestamp": full_index,
+            "electricity_price": constant_price
+        })
+        return df_constant_price
+
     df = pd.read_csv(price_csv)
 
     # Parse only the start timestamp from "DD/MM/YYYY HH:MM:SS - DD/MM/YYYY HH:MM:SS"
     df["timestamp"] = pd.to_datetime(
         df["MTU (CET/CEST)"].str.split(" - ").str[0].str.strip(),
+        #(new)df["MTU (CET/CEST)"].str.split(" - ").str[0].str.replace(r'\s*\([A-Z]+\)', '', regex=True).str.strip(),
         format="%d/%m/%Y %H:%M:%S"
     )
 
     # EUR/MWh → CHF/kWh: divide by 1000 (unit), multiply by exchange rate
     df["electricity_price"] = (
         pd.to_numeric(df["Day-ahead Price (EUR/MWh)"], errors="coerce")
-        * _EUR_TO_CHF
+        * config.exchange_rate # Use the exchange rate from config
         / 1000
     )
 
     df = df[["timestamp", "electricity_price"]].set_index("timestamp")
+    #newdf = df[["timestamp", "electricity_price"]].drop_duplicates(subset=["timestamp"]).set_index("timestamp")
 
     # Upsample to 15-min by forward-fill
     full_index = pd.date_range(
@@ -643,4 +657,3 @@ def load_price_curve(year: int) -> pd.DataFrame:
     df = df.reindex(full_index).ffill().bfill()
 
     return df.reset_index().rename(columns={"index": "timestamp"})
-
