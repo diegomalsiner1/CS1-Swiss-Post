@@ -2,7 +2,7 @@
 
 interest_rate = 0.06
 lifetime = 30
-load_existing_input_dict = True
+load_existing_input_dict = False
 max_timesteps = None
 optimization_mode = "lp"
 surplus_handling = "curtail"

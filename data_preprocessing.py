@@ -621,7 +621,7 @@ def load_price_curve(year: int) -> pd.DataFrame:
 
     # Parse only the start timestamp from "DD/MM/YYYY HH:MM:SS - DD/MM/YYYY HH:MM:SS"
     df["timestamp"] = pd.to_datetime(
-        df["MTU (CET/CEST)"].str.split(" - ").str[0].str.strip(),
+        df["MTU (CET/CEST)"].str.split(" - ").str[0].str.strip().str.replace(r'\s*\(CET\)|\s*\(CEST\)', '', regex=True),
         format="%d/%m/%Y %H:%M:%S"
     )
 
@@ -632,12 +632,12 @@ def load_price_curve(year: int) -> pd.DataFrame:
         / 1000
     )
 
-    df = df[["timestamp", "electricity_price"]].set_index("timestamp")
+    df = df[["timestamp", "electricity_price"]].groupby("timestamp").first().reset_index().set_index("timestamp")
 
     # Upsample to 15-min by forward-fill
     full_index = pd.date_range(
-        start=pd.Timestamp(f"{year}-01-01"),
-        end=pd.Timestamp(f"{year}-12-31 23:45"),
+        start=df.index.min(),
+        end=pd.Timestamp(f"{df.index.max().year}-12-31 23:45:00"),
         freq="15min"
     )
     df = df.reindex(full_index).ffill().bfill()
