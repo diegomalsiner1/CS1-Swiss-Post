@@ -44,7 +44,6 @@ def get_runtime_parameters() -> dict:
             "battery_min_soc_fraction": getattr(config, "battery_min_soc_fraction", 0.0),
             "battery_cycle_life": getattr(config, "battery_cycle_life", None),
             "battery_calendar_life_years": getattr(config, "battery_calendar_life_years", None),
-            "surplus_handling": getattr(config, "surplus_handling", "curtail"),
             "battery_replacement_cost_fraction": getattr(config, "battery_replacement_cost_fraction", 0.0),
             # Parameters for sensitivity and report
             "run_battery_size_sensitivity": getattr(config, "run_battery_size_sensitivity", False),
@@ -86,7 +85,6 @@ def save_run_artifacts(run_dir: Path, input_dict: dict, solution_summary: dict, 
         "no_battery_import_cost": float(solution_summary.get("no_battery_import_cost", 0.0)),
         "no_battery_peak_demand_cost": float(solution_summary.get("no_battery_peak_demand_cost", 0.0)),
         "no_battery_total_cost": float(solution_summary.get("no_battery_total_cost", 0.0)),
-        "curtailed_energy_kwh": float(solution_summary.get("curtailed_energy_kwh", 0.0)),
         "replacement_cost": float(solution_summary.get("replacement_cost", 0.0)),
         "replacement_year": solution_summary.get("replacement_year"),
         "npv": float(solution_summary.get("npv", np.nan)),
@@ -262,7 +260,6 @@ def run_battery_size_sensitivity(input_dict: dict, battery_sizes_kwh) -> pd.Data
                 "fixed_om_cost": 0.0,
                 "annualized_battery_cost": 0.0,
                 "peak_demand_cost": float(baseline_summary.get("no_battery_peak_demand_cost", 0.0)),
-                "curtailed_energy_kwh": 0.0,
                 **baseline_summary,
             }
             rows.append(
@@ -400,7 +397,6 @@ battery_soc = [v.solution_value() for v in solution_handles["battery_level_vars"
 battery_charge_power = [v.solution_value() for v in solution_handles["battery_in_flow_vars"]]
 battery_discharge_power = [v.solution_value() for v in solution_handles["battery_out_flow_vars"]]
 pv_flow = [v.solution_value() for v in solution_handles["pv_out_flow_vars"]]
-spill_flow = [v.solution_value() for v in solution_handles["spill_flow_vars"]]
 grid_flow = [v.solution_value() for v in solution_handles["grid_flow_vars"]]
 total_load = input_dict.get("total_demand", [])
 timestamps = input_dict.get("timestamps")
@@ -411,11 +407,6 @@ rp.export_results(
     timestamps=timestamps,
     input_dict=input_dict,
     pv_flow=pv_flow,
-    spill_flow=spill_flow,
-    grid_flow=grid_flow,
-    total_load=total_load,
-    battery_charge_power=battery_charge_power,
-    battery_discharge_power=battery_discharge_power,
 )
 
 run_battery_size_sensitivity_flag = getattr(config, "run_battery_size_sensitivity", False)

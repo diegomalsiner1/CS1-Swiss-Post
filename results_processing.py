@@ -324,16 +324,11 @@ def compute_baseline_grid_import_series(input_dict):
     demand = np.asarray(input_dict.get("total_demand", []), dtype=float)
     pv_cf = np.asarray(input_dict.get("PV_capacity_factor", []), dtype=float)
     pv_max_capacity = float(input_dict["parameters"]["PV_max_capacity"])
-    surplus_handling = input_dict["parameters"].get("surplus_handling", "curtail").lower()
 
     if len(demand) != len(pv_cf):
         raise ValueError("Input timeseries lengths must match for baseline grid import computation.")
 
     pv_available = pv_cf * pv_max_capacity
-    if surplus_handling == "must_absorb" and np.any(pv_available > demand + 1e-9):
-        raise ValueError(
-            "No-battery baseline grid import is infeasible under surplus_handling='must_absorb' because PV exceeds demand."
-        )
     return np.maximum(demand - pv_available, 0.0)
 
 
@@ -545,7 +540,6 @@ def export_results(
     timestamps=None,
     input_dict=None,
     pv_flow=None,
-    spill_flow=None,
     grid_flow=None,
     grid_export=None,
     total_load=None,
@@ -586,7 +580,6 @@ def export_results(
     if timestamps is not None: data_map["timestamp"] = timestamps
     if battery_soc is not None: data_map["battery_soc"] = battery_soc
     if pv_flow is not None: data_map["pv_flow"] = pv_flow
-    if spill_flow is not None: data_map["spill_flow"] = spill_flow
     if grid_flow is not None: data_map["grid_flow"] = grid_flow
     if grid_export is not None: data_map["grid_export"] = grid_export
     if total_load is not None: data_map["total_load"] = total_load

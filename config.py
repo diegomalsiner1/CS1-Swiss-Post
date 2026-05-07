@@ -2,10 +2,9 @@
 
 interest_rate = 0.06
 lifetime = 30
-load_existing_input_dict = True
+load_existing_input_dict = False
 max_timesteps = None
 optimization_mode = "lp"
-surplus_handling = "must_absorb"
 PV_max_capacity = 10000
 Battery_max_inflow = 1000
 Battery_max_outflow = 1000

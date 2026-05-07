@@ -64,9 +64,6 @@ def setup(
     optimization_mode = input_dict["parameters"].get("optimization_mode", "milp").lower()
     if optimization_mode not in {"milp", "lp"}:
         raise ValueError("optimization_mode must be 'milp' or 'lp'")
-    surplus_handling = input_dict["parameters"].get("surplus_handling", "curtail").lower()
-    if surplus_handling not in {"curtail", "must_absorb"}:
-        raise ValueError("surplus_handling must be 'curtail' or 'must_absorb'")
     battery_max_c_rate = input_dict["parameters"].get("battery_max_c_rate")
     if battery_max_c_rate is not None:
         battery_max_c_rate = float(battery_max_c_rate)
@@ -97,10 +94,9 @@ def setup(
         fixed_battery_capacity_kwh = float(fixed_battery_capacity_kwh)
         if fixed_battery_capacity_kwh < 0 or fixed_battery_capacity_kwh > Battery_capacity_upper_bound:
             raise ValueError("fixed_battery_capacity_kwh must lie within [0, Battery_max_capacity]")
-        eps = max(1e-2, fixed_battery_capacity_kwh * 1e-5)
         Battery_capacity = model.NumVar(
-            max(0, fixed_battery_capacity_kwh - eps),
-            fixed_battery_capacity_kwh + eps,
+            fixed_battery_capacity_kwh,
+            fixed_battery_capacity_kwh,
             "Battery_Capacity",
         )
     else:
@@ -123,7 +119,6 @@ def setup(
     grid_import_vars = []
     grid_export_vars = []
     pv_out_flow_vars = []
-    spill_flow_vars = []
 
     for t in tqdm(timesteps):
         # Integer Variables
@@ -133,7 +128,6 @@ def setup(
         Time_dependent_variables[("Grid_export",t)] = model.NumVar(0, inf, f"Powerflow_Grid_Export_{t}")
         Time_dependent_variables[("Battery_level",t)] = model.NumVar(0, Battery_capacity_upper_bound, f"Battery_Level_{t}")
         Time_dependent_variables[("PV_out_flow",t)] = model.NumVar(0, PV_max_capacity, f"PV_Powerflow_out_{t}")
-        Time_dependent_variables[("Spill_flow",t)] = model.NumVar(0, PV_max_capacity, f"Powerflow_Spill_{t}")
 
         battery_in_flow_vars.append(Time_dependent_variables[("Battery_in_flow", t)])
         battery_out_flow_vars.append(Time_dependent_variables[("Battery_out_flow", t)])
@@ -141,7 +135,6 @@ def setup(
         grid_import_vars.append(Time_dependent_variables[("Grid_import", t)])
         grid_export_vars.append(Time_dependent_variables[("Grid_export", t)])
         pv_out_flow_vars.append(Time_dependent_variables[("PV_out_flow", t)])
-        spill_flow_vars.append(Time_dependent_variables[("Spill_flow", t)])
 
         if use_binaries:
             Time_dependent_variables[("Binary_battery_in_flow",t)] = model.BoolVar(f"Binary_battery_in_flow_{t}")
@@ -168,25 +161,18 @@ def setup(
         else:
             model.Add(power_balance_expr == demand_t)
 
-        # PV allocation between local use and curtailment/spillage
+        # PV is available for local use or export
         pv_limit_t = input_dict["PV_capacity_factor"][t] * PV_max_capacity
         if debug_infeasibility:
             s_pv = model.NumVar(0, inf, f"slack_pv_balance_{t}")
-            pv_balance_expr = (
-                Time_dependent_variables[("PV_out_flow", t)]
-                + Time_dependent_variables[("Spill_flow", t)]
-            )
+            pv_balance_expr = Time_dependent_variables[("PV_out_flow", t)]
             model.Add(pv_balance_expr - pv_limit_t <= s_pv)
             model.Add(pv_limit_t - pv_balance_expr <= s_pv)
             slacks.append(s_pv)
         else:
             model.Add(
-                Time_dependent_variables[("PV_out_flow", t)]
-                + Time_dependent_variables[("Spill_flow", t)]
-                == pv_limit_t
+                Time_dependent_variables[("PV_out_flow", t)] <= pv_limit_t
             )
-        if surplus_handling == "must_absorb":
-            model.Add(Time_dependent_variables[("Spill_flow", t)] == 0)
 
         # MILP mode enforces explicit mutual exclusivity via binary on/off variables.
         if use_binaries:
@@ -315,7 +301,6 @@ def setup(
         "grid_export_vars": grid_export_vars,
         "grid_flow_vars": grid_import_vars,
         "pv_out_flow_vars": pv_out_flow_vars,
-        "spill_flow_vars": spill_flow_vars,
         "yearly_peak_var": Peak_grid_flow,
         "monthly_peak_vars": monthly_peak_vars,
     }
@@ -355,7 +340,6 @@ def summarize_solution(model, solution_handles):
     yearly_peak = solution_handles["yearly_peak_var"].solution_value() if solution_handles["yearly_peak_var"] else None
     monthly_peaks = {k: v.solution_value() for k, v in solution_handles["monthly_peak_vars"].items()}
     sum_monthly = sum(monthly_peaks.values()) if monthly_peaks else 0
-    curtailed_energy_kwh = sum(v.solution_value() for v in solution_handles["spill_flow_vars"]) * 0.25
     battery_capacity_kwh = solution_handles["battery_capacity"].solution_value()
     discharged_energy_kwh = sum(v.solution_value() for v in solution_handles["battery_out_flow_vars"]) * 0.25
     equivalent_full_cycles = np.nan
@@ -374,7 +358,6 @@ def summarize_solution(model, solution_handles):
         "yearly_peak": yearly_peak,
         "monthly_peaks": monthly_peaks,
         "sum_monthly_peaks": sum_monthly,
-        "curtailed_energy_kwh": curtailed_energy_kwh,
         "discharged_energy_kwh": discharged_energy_kwh,
         "equivalent_full_cycles": equivalent_full_cycles,
     }
@@ -391,17 +374,12 @@ def compute_no_battery_baseline(input_dict):
         "peak_shaving_granularity",
         input_dict["parameters"].get("peak_shaving_frequency", "yearly"),
     ).lower()
-    surplus_handling = input_dict["parameters"].get("surplus_handling", "curtail").lower()
     if peak_shaving_frequency not in {"yearly", "monthly"}:
         raise ValueError("peak_shaving_granularity must be 'yearly' or 'monthly'")
 
     grid_import_series = []
     for t, demand in enumerate(input_dict["total_demand"]):
         pv_limit = input_dict["PV_capacity_factor"][t] * input_dict["parameters"]["PV_max_capacity"]
-        if surplus_handling == "must_absorb" and pv_limit > demand + 1e-9:
-            raise ValueError(
-                "No-battery baseline is infeasible under surplus_handling='must_absorb' because PV exceeds demand."
-            )
         imported_power = max(0.0, demand - pv_limit)
         grid_import_series.append(imported_power)
 
