@@ -1,4 +1,5 @@
 import calendar
+from logging import config
 from pathlib import Path
 import pandas as pd
 import numpy as np
@@ -7,6 +8,7 @@ import re
 from tkinter import filedialog
 from datetime import datetime, time
 from openpyxl import load_workbook
+import config
 
 ## Will be used to process the input data before feeding the data into the optimization framework
 
@@ -597,50 +599,77 @@ def generate_zustellung_profile(file_path=None, year=None, sheet_name=None):
 # Energy price curve
 # ==========================================================
 
-# 2025 average EUR/CHF rate. Update if using a different year or rate.
-_EUR_TO_CHF = 0.94
 
 def load_price_curve(year: int) -> pd.DataFrame:
     """
-    Load ENTSO-E day-ahead spot prices from GUI_ENERGY_PRICES.csv, convert to
-    CHF/kWh, and resample from hourly to 15-min resolution.
+    Loads energy prices. Handles import and export independently based on config
+    using the confirmed working regex/resampling pipeline.
+    """    
+    # 1. Determine requirements from config
+    spot_price_year = getattr(config, "Spot_price_year", year) # Use provided year as fallback
+    price_csv = Path(f"01-INPUT-DATA/Spot_prices/GUI_ENERGY_PRICES_{spot_price_year}.csv")
 
-    Resampling uses forward-fill because spot prices are step functions:
-    the price quoted for 00:00-01:00 applies equally to 00:15, 00:30, 00:45.
+    needs_import_dyn = not getattr(config, "use_constant_import_price", False)
+    needs_export_dyn = not getattr(config, "use_constant_export_price", False)
+    
+    # 2. Process Dynamic Data if needed
+    df_dynamic_resampled = None
+    if needs_import_dyn or needs_export_dyn:
+        if not price_csv.exists():
+            raise FileNotFoundError(
+                f"Energy price file not found at {price_csv.resolve()}. "
+                "Place GUI_ENERGY_PRICES.csv in 01-INPUT-DATA/."
+            )
 
-    Returns a DataFrame with columns [timestamp, electricity_price].
-    """
-    price_csv = Path("01-INPUT-DATA/GUI_ENERGY_PRICES.csv")
-    if not price_csv.exists():
-        raise FileNotFoundError(
-            f"Energy price file not found at {price_csv.resolve()}. "
-            "Place GUI_ENERGY_PRICES.csv in 01-INPUT-DATA/."
+        df = pd.read_csv(price_csv)
+
+        # EXACT logic from your working snippet
+        df["timestamp"] = pd.to_datetime(
+            df["MTU (CET/CEST)"].str.split(" - ").str[0].str.strip()
+            .str.replace(r'\s*\(CET\)|\s*\(CEST\)', '', regex=True),
+            format="%d/%m/%Y %H:%M:%S"
         )
 
-    df = pd.read_csv(price_csv)
+        # Using your _EUR_TO_CHF or config equivalent
+        rate = getattr(config, "exchange_rate", 1.0) # Fallback to 1.0 if not defined
+        df["electricity_price"] = (
+            pd.to_numeric(df["Day-ahead Price (EUR/MWh)"], errors="coerce")
+            * rate
+            / 1000
+        )
 
-    # Parse only the start timestamp from "DD/MM/YYYY HH:MM:SS - DD/MM/YYYY HH:MM:SS"
-    df["timestamp"] = pd.to_datetime(
-        df["MTU (CET/CEST)"].str.split(" - ").str[0].str.strip().str.replace(r'\s*\(CET\)|\s*\(CEST\)', '', regex=True),
-        format="%d/%m/%Y %H:%M:%S"
-    )
+        # Groupby and Set Index
+        df = df[["timestamp", "electricity_price"]].groupby("timestamp").first()
 
-    # EUR/MWh → CHF/kWh: divide by 1000 (unit), multiply by exchange rate
-    df["electricity_price"] = (
-        pd.to_numeric(df["Day-ahead Price (EUR/MWh)"], errors="coerce")
-        * _EUR_TO_CHF
-        / 1000
-    )
+        # Upsample to 15-min by forward-fill
+        full_index = pd.date_range(
+            start=df.index.min(),
+            end=pd.Timestamp(f"{df.index.max().year}-12-31 23:45:00"),
+            freq="15min"
+        )
+        df_dynamic_resampled = df.reindex(full_index).ffill().bfill()
+    
+    # 3. Build final DataFrame
+    # If we didn't load dynamic data, we need a manual index for the year
+    if df_dynamic_resampled is not None:
+        final_index = df_dynamic_resampled.index
+    else:
+        start_date = pd.Timestamp(f"{year}-01-01 00:00:00")
+        end_date = pd.Timestamp(f"{year}-12-31 23:45:00")
+        final_index = pd.date_range(start=start_date, end=end_date, freq="15min")
 
-    df = df[["timestamp", "electricity_price"]].groupby("timestamp").first().reset_index().set_index("timestamp")
+    df_prices = pd.DataFrame(index=final_index)
 
-    # Upsample to 15-min by forward-fill
-    full_index = pd.date_range(
-        start=df.index.min(),
-        end=pd.Timestamp(f"{df.index.max().year}-12-31 23:45:00"),
-        freq="15min"
-    )
-    df = df.reindex(full_index).ffill().bfill()
+    # Assign Import Price
+    if not needs_import_dyn:
+        df_prices["import_price"] = getattr(config, "energy_import_price", 0.0)
+    else:
+        df_prices["import_price"] = df_dynamic_resampled["electricity_price"]
 
-    return df.reset_index().rename(columns={"index": "timestamp"})
+    # Assign Export Price
+    if not needs_export_dyn:
+        df_prices["export_price"] = getattr(config, "energy_export_price", 0.0)
+    else:
+        df_prices["export_price"] = df_dynamic_resampled["electricity_price"]
 
+    return df_prices.reset_index().rename(columns={"index": "timestamp"})

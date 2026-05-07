@@ -381,68 +381,74 @@ def build_peak_metrics_tables(timestamps, baseline_grid_import, optimized_grid_i
     return pd.DataFrame(summary_rows), top_peak_intervals
 
 
-def build_monthly_summary_table(timestamps, baseline_grid_import, optimized_grid_import, electricity_price):
-    monthly_df = pd.DataFrame({
+
+def build_monthly_summary_table(timestamps, baseline_grid_import, optimized_grid_import, import_price_with_grid, raw_import_price, optimized_grid_export, export_price):
+    df = pd.DataFrame({
         "timestamp": pd.to_datetime(list(timestamps)),
         "baseline_grid_import": np.asarray(baseline_grid_import, dtype=float),
         "optimized_grid_import": np.asarray(optimized_grid_import, dtype=float),
-        "electricity_price": np.asarray(electricity_price, dtype=float),
+        "import_price_with_grid": np.asarray(import_price_with_grid, dtype=float),
+        "raw_import_price": np.asarray(raw_import_price, dtype=float)
     })
-    monthly_df["month"] = monthly_df["timestamp"].dt.to_period("M").astype(str)
-    timestep_hours = 0.25
-    monthly_df["baseline_import_cost"] = (
-        monthly_df["baseline_grid_import"] * monthly_df["electricity_price"] * timestep_hours
-    )
-    monthly_df["optimized_import_cost"] = (
-        monthly_df["optimized_grid_import"] * monthly_df["electricity_price"] * timestep_hours
-    )
+    
+    # NEW: Add Export Data
+    if optimized_grid_export is not None: df["optimized_grid_export"] = np.asarray(optimized_grid_export, dtype=float)
+    if export_price is not None: df["export_price"] = np.asarray(export_price, dtype=float)
+    
+    df["month"] = df["timestamp"].dt.to_period("M").astype(str)
+    timestep_hours = 0.25 
+    
+    df["baseline_import_cost"] = df["baseline_grid_import"] * df["import_price_with_grid"] * timestep_hours
+    df["optimized_import_cost"] = df["optimized_grid_import"] * df["import_price_with_grid"] * timestep_hours
+    
+    # NEW: Revenue calculation
+    df["optimized_export_revenue"] = 0.0
+    if "optimized_grid_export" in df.columns and "export_price" in df.columns:
+        df["optimized_export_revenue"] = df["optimized_grid_export"] * df["export_price"] * timestep_hours
 
     summary_df = (
-        monthly_df.groupby("month", as_index=False)
+        df.groupby("month", as_index=False)
         .agg(
             monthly_import_cost_before=("baseline_import_cost", "sum"),
             monthly_import_cost_after=("optimized_import_cost", "sum"),
             monthly_peak_before=("baseline_grid_import", "max"),
             monthly_peak_after=("optimized_grid_import", "max"),
+            monthly_export_revenue=("optimized_export_revenue", "sum"), # Added
         )
     )
-    summary_df["monthly_savings"] = (
-        summary_df["monthly_import_cost_before"] - summary_df["monthly_import_cost_after"]
-    )
-    summary_df["monthly_peak_reduction"] = (
-        summary_df["monthly_peak_before"] - summary_df["monthly_peak_after"]
-    )
+    
+    summary_df["monthly_savings"] = summary_df["monthly_import_cost_before"] - summary_df["monthly_import_cost_after"]
+    summary_df["monthly_peak_reduction"] = summary_df["monthly_peak_before"] - summary_df["monthly_peak_after"]
+    summary_df["monthly_total_benefit"] = summary_df["monthly_savings"] + summary_df["monthly_export_revenue"]
 
-    return summary_df[
-        [
-            "month",
-            "monthly_import_cost_before",
-            "monthly_import_cost_after",
-            "monthly_savings",
-            "monthly_peak_before",
-            "monthly_peak_after",
-            "monthly_peak_reduction",
-        ]
-    ]
+    return summary_df
 
 
-def build_weekly_summary_table(timestamps, baseline_grid_import, optimized_grid_import, electricity_price):
+
+def build_weekly_summary_table(timestamps, baseline_grid_import, optimized_grid_import, import_price_with_grid, raw_import_price, optimized_grid_export, export_price):
     weekly_df = pd.DataFrame({
         "timestamp": pd.to_datetime(list(timestamps)),
         "baseline_grid_import": np.asarray(baseline_grid_import, dtype=float),
         "optimized_grid_import": np.asarray(optimized_grid_import, dtype=float),
-        "electricity_price": np.asarray(electricity_price, dtype=float),
+        "import_price_with_grid": np.asarray(import_price_with_grid, dtype=float),
+        "raw_import_price": np.asarray(raw_import_price, dtype=float)
     })
+    if optimized_grid_export is not None: weekly_df["optimized_grid_export"] = np.asarray(optimized_grid_export, dtype=float)
+    if export_price is not None: weekly_df["export_price"] = np.asarray(export_price, dtype=float)
     weekly_df["week_start"] = weekly_df["timestamp"].dt.to_period("W-MON").apply(lambda p: p.start_time.date().isoformat())
     timestep_hours = 0.25
     weekly_df["baseline_import_energy_kwh"] = weekly_df["baseline_grid_import"] * timestep_hours
     weekly_df["optimized_import_energy_kwh"] = weekly_df["optimized_grid_import"] * timestep_hours
     weekly_df["baseline_import_cost"] = (
-        weekly_df["baseline_grid_import"] * weekly_df["electricity_price"] * timestep_hours
+        weekly_df["baseline_grid_import"] * weekly_df["import_price_with_grid"] * timestep_hours
     )
     weekly_df["optimized_import_cost"] = (
-        weekly_df["optimized_grid_import"] * weekly_df["electricity_price"] * timestep_hours
+        weekly_df["optimized_grid_import"] * weekly_df["import_price_with_grid"] * timestep_hours
     )
+    weekly_df["optimized_export_revenue"] = 0.0
+    if "optimized_grid_export" in weekly_df.columns and "export_price" in weekly_df.columns:
+        weekly_df["optimized_export_revenue"] = weekly_df["optimized_grid_export"] * weekly_df["export_price"] * timestep_hours
+    
 
     summary_df = (
         weekly_df.groupby("week_start", as_index=False)
@@ -452,6 +458,7 @@ def build_weekly_summary_table(timestamps, baseline_grid_import, optimized_grid_
             weekly_import_cost_before=("baseline_import_cost", "sum"),
             weekly_import_cost_after=("optimized_import_cost", "sum"),
             weekly_peak_before=("baseline_grid_import", "max"),
+            weekly_export_revenue=("optimized_export_revenue", "sum"),
             weekly_peak_after=("optimized_grid_import", "max"),
         )
     )
@@ -464,6 +471,8 @@ def build_weekly_summary_table(timestamps, baseline_grid_import, optimized_grid_
     summary_df["weekly_peak_reduction"] = (
         summary_df["weekly_peak_before"] - summary_df["weekly_peak_after"]
     )
+    summary_df["weekly_total_benefit"] = summary_df["weekly_cost_savings"] + summary_df["weekly_export_revenue"]
+    
 
     return summary_df[
         [
@@ -474,6 +483,8 @@ def build_weekly_summary_table(timestamps, baseline_grid_import, optimized_grid_
             "weekly_import_cost_before",
             "weekly_import_cost_after",
             "weekly_cost_savings",
+            "weekly_export_revenue",
+            "weekly_total_benefit",
             "weekly_peak_before",
             "weekly_peak_after",
             "weekly_peak_reduction",
@@ -536,6 +547,7 @@ def export_results(
     pv_flow=None,
     spill_flow=None,
     grid_flow=None,
+    grid_export=None,
     total_load=None,
     battery_charge_power=None,
     battery_discharge_power=None,
@@ -576,13 +588,24 @@ def export_results(
     if pv_flow is not None: data_map["pv_flow"] = pv_flow
     if spill_flow is not None: data_map["spill_flow"] = spill_flow
     if grid_flow is not None: data_map["grid_flow"] = grid_flow
+    if grid_export is not None: data_map["grid_export"] = grid_export
     if total_load is not None: data_map["total_load"] = total_load
     if battery_charge_power is not None: data_map["battery_charge_power"] = battery_charge_power
     if battery_discharge_power is not None: data_map["battery_discharge_power"] = battery_discharge_power
+    
     if input_dict is not None:
         data_map["baseline_grid_import"] = compute_baseline_grid_import_series(input_dict)
-        if "electricity_price" in input_dict:
-            data_map["electricity_price"] = input_dict["electricity_price"]
+        
+        # --- PRICE EXPORT LOGIC ---
+        # Add import price
+        if "import_price_with_grid" in input_dict:
+            data_map["import_price_with_grid"] = input_dict["import_price_with_grid"]
+        elif "import_price" in input_dict:
+            data_map["import_price_with_grid"] = input_dict["import_price"]
+            
+        # ADDED: Logic for export price
+        if "export_price" in input_dict:
+            data_map["export_price"] = input_dict["export_price"]
 
     # Find the minimum length across all provided arrays
     min_len = min(len(v) for v in data_map.values())
@@ -615,18 +638,26 @@ def export_results(
         top_peak_intervals_df.to_csv(top_peak_path, index=False)
         if input_dict is not None:
             monthly_summary_df = build_monthly_summary_table(
-                ts_df["timestamp"],
-                ts_df["baseline_grid_import"],
-                ts_df["grid_flow"],
-                input_dict["electricity_price"][:min_len],
+                timestamps=ts_df["timestamp"],
+                baseline_grid_import=ts_df["baseline_grid_import"],
+                optimized_grid_import=ts_df["grid_flow"],
+                import_price_with_grid=input_dict["import_price_with_grid"][:min_len],
+                raw_import_price=input_dict.get("import_price", input_dict.get("raw_import_price"))[:min_len],
+                optimized_grid_export=ts_df["grid_export"] if "grid_export" in ts_df.columns else None, # Already added this
+                export_price=input_dict["export_price"][:min_len] if "export_price" in input_dict else None, # Already added this
             )
             monthly_summary_path = run_dir / "monthly_summary.csv"
             monthly_summary_df.to_csv(monthly_summary_path, index=False)
+
             weekly_summary_df = build_weekly_summary_table(
-                ts_df["timestamp"],
-                ts_df["baseline_grid_import"],
-                ts_df["grid_flow"],
-                input_dict["electricity_price"][:min_len],
+                timestamps=ts_df["timestamp"],
+                baseline_grid_import=ts_df["baseline_grid_import"],
+                optimized_grid_import=ts_df["grid_flow"],
+                import_price_with_grid=input_dict["import_price_with_grid"][:min_len],
+                raw_import_price=input_dict.get("import_price", input_dict.get("raw_import_price"))[:min_len],
+                # ADD THESE TWO ARGUMENTS BELOW:
+                optimized_grid_export=ts_df["grid_export"] if "grid_export" in ts_df.columns else None,
+                export_price=input_dict["export_price"][:min_len] if "export_price" in input_dict else None,
             )
             weekly_summary_path = run_dir / "weekly_summary.csv"
             weekly_summary_df.to_csv(weekly_summary_path, index=False)

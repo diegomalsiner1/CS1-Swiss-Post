@@ -182,16 +182,18 @@ def build_input_dict_from_raw_data() -> dict:
     # Dynamic price profile from ENTSO-E day-ahead spot prices (CHF/kWh)
     price_df = dpp.load_price_curve(year=year)
     merged_df = merged_df.merge(price_df, on="timestamp", how="left")
-    merged_df["electricity_price"] = merged_df["electricity_price"].ffill().bfill()
-    merged_df["electricity_selling_price"] = (merged_df["electricity_price"] - config.grid_fees).tolist()
+    merged_df["import_price"] = merged_df["import_price"].ffill().bfill()
+    merged_df["import_price_with_grid"] = (merged_df["import_price"] + config.grid_fees).tolist()
+    merged_df["export_price"] = merged_df["export_price"].ffill().bfill()
 
     return {
         "parameters": get_runtime_parameters(),
         "timestamps": merged_df["timestamp"].astype(str).tolist(),
         "total_demand": merged_df["total_demand"].tolist(),
         "PV_capacity_factor": merged_df["PV_capacity_factor"].tolist(),
-        "electricity_price": merged_df["electricity_price"].tolist(),
-        "electricity_selling_price": merged_df["electricity_selling_price"].tolist(),
+        "import_price": merged_df["import_price"].tolist(),
+        "import_price_with_grid":merged_df["import_price_with_grid"].tolist(),
+        "export_price": merged_df["export_price"].tolist(),
     }
 
 
@@ -206,8 +208,13 @@ def load_or_build_input_dict() -> dict:
             print(f"Loading input dictionary from {INPUT_DICT_PATH}")
             input_dict = json.load(f)
         input_dict["parameters"] = get_runtime_parameters()
-        if "electricity_price" in input_dict and "electricity_selling_price" not in input_dict:
-            input_dict["electricity_selling_price"] = [float(p) - config.grid_fees for p in input_dict["electricity_price"]]
+        
+        # Migration/Legacy fallback: map old keys to new keys if necessary
+        if "import_price" not in input_dict and "electricity_price" in input_dict:
+            input_dict["import_price"] = input_dict.pop("electricity_price")
+        if "export_price" not in input_dict:
+            selling_price = input_dict.pop("electricity_selling_price", None)
+            input_dict["export_price"] = selling_price if selling_price is not None else [p - config.grid_fees for p in input_dict["import_price"]]
 
         steps_before = len(input_dict.get("total_demand", []))
         input_dict = apply_timestep_cap(input_dict, config.max_timesteps)
@@ -367,7 +374,7 @@ def build_default_sensitivity_sizes(input_dict: dict, optimized_capacity_kwh: fl
         sizes.append(min(cap_max, max(100.0, optimized_capacity_kwh * 0.25)))
 
     # Unique, sorted, rounded for cleaner exports.
-    sizes = sorted({round(float(s), 3) for s in sizes if s >= 0})
+    sizes = sorted({float(s) for s in sizes if s >= 0})
     return sizes
 
 

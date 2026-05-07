@@ -2,10 +2,10 @@
 
 interest_rate = 0.06
 lifetime = 30
-load_existing_input_dict = False
+load_existing_input_dict = True
 max_timesteps = None
 optimization_mode = "lp"
-surplus_handling = "curtail"
+surplus_handling = "must_absorb"
 PV_max_capacity = 10000
 Battery_max_inflow = 1000
 Battery_max_outflow = 1000
@@ -24,7 +24,13 @@ battery_replacement_cost_fraction = 1
 peak_shaving_cost_factor = 19.2
 peak_shaving_frequency = "yearly"
 operation_and_maintenance = 100
-grid_fees = 0.05
+grid_fees = 0.09
 run_battery_size_sensitivity = 1
 battery_sensitivity_sizes_kwh = None
 generate_pdf_report = True
+use_constant_import_price = True
+use_constant_export_price = False
+energy_import_price = 0.09
+energy_export_price = 0.09
+Spot_price_year = 2024
+exchange_rate = 0.94

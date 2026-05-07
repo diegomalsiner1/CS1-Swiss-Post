@@ -29,7 +29,7 @@ def setup(
         )
 
     # Basic input consistency checks
-    required_series = ["total_demand", "PV_capacity_factor", "electricity_price", "electricity_selling_price"]
+    required_series = ["total_demand", "PV_capacity_factor", "import_price_with_grid", "export_price"]
     missing = [key for key in required_series if key not in input_dict]
     if missing:
         raise ValueError(f"input_dict must contain the following time series: {', '.join(required_series)}")
@@ -97,9 +97,10 @@ def setup(
         fixed_battery_capacity_kwh = float(fixed_battery_capacity_kwh)
         if fixed_battery_capacity_kwh < 0 or fixed_battery_capacity_kwh > Battery_capacity_upper_bound:
             raise ValueError("fixed_battery_capacity_kwh must lie within [0, Battery_max_capacity]")
+        eps = max(1e-2, fixed_battery_capacity_kwh * 1e-5)
         Battery_capacity = model.NumVar(
-            fixed_battery_capacity_kwh,
-            fixed_battery_capacity_kwh,
+            max(0, fixed_battery_capacity_kwh - eps),
+            fixed_battery_capacity_kwh + eps,
             "Battery_Capacity",
         )
     else:
@@ -268,11 +269,11 @@ def setup(
 
     timestep_hours = 0.25
     import_cost_expr = sum(
-        Time_dependent_variables[("Grid_import", t)] * input_dict["electricity_price"][t] * timestep_hours
+        Time_dependent_variables[("Grid_import", t)] * input_dict["import_price_with_grid"][t] * timestep_hours
         for t in timesteps
     )
     export_revenue_expr = sum(
-        Time_dependent_variables[("Grid_export", t)] * input_dict["electricity_selling_price"][t] * timestep_hours
+        Time_dependent_variables[("Grid_export", t)] * input_dict["export_price"][t] * timestep_hours
         for t in timesteps
     )
     annualized_battery_cost_expr = CRF * (
@@ -406,7 +407,7 @@ def compute_no_battery_baseline(input_dict):
 
     total_import_cost = sum(
         imported_power * price * timestep_hours
-        for imported_power, price in zip(grid_import_series, input_dict["electricity_price"])
+        for imported_power, price in zip(grid_import_series, input_dict["import_price_with_grid"])
     )
 
     no_battery_peak_demand_cost = 0.0

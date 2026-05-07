@@ -4,6 +4,7 @@ from datetime import datetime
 import os
 from pathlib import Path
 import textwrap
+import config
 
 # Ensure matplotlib uses a writable config/cache directory and headless backend.
 _MPL_CACHE_DIR = Path(__file__).resolve().parent / ".matplotlib-cache"
@@ -250,13 +251,14 @@ def _plot_representative_peak_days(pdf: PdfPages, df_ts: pd.DataFrame) -> None:
 
 
 def _plot_dispatch_and_soc(pdf: PdfPages, df_ts: pd.DataFrame) -> None:
-    required = {"timestamp", "grid_flow", "pv_flow", "total_load", "battery_charge_power", "battery_discharge_power"}
+    required = {"timestamp", "grid_flow", "pv_flow", "total_load", "battery_charge_power", "battery_discharge_power", "grid_export"}
     if not required.issubset(df_ts.columns):
         return
     fig, ax = plt.subplots(figsize=(11.69, 8.27))
     ax.plot(df_ts["timestamp"], df_ts["total_load"], label="Net load", color="#1B1B1B", linewidth=1.3)
     ax.plot(df_ts["timestamp"], df_ts["grid_flow"], label="Grid import", color=_BRAND["primary"], linewidth=1.2)
     ax.plot(df_ts["timestamp"], df_ts["pv_flow"], label="PV used", color=_BRAND["accent"], linewidth=1.2)
+    ax.plot(df_ts["timestamp"], df_ts["grid_export"], label="Grid export", color=_BRAND["secondary"], linewidth=1.2, linestyle="--")
     ax.plot(df_ts["timestamp"], df_ts["battery_discharge_power"], label="Battery discharge", color=_BRAND["ok"], linewidth=1.1)
     ax.plot(df_ts["timestamp"], -df_ts["battery_charge_power"], label="Battery charge (negative)", color="#2563EB", linewidth=1.1)
     _style_axes(ax, "Dispatch Overview", xlabel="Timestamp", ylabel="Power [kW]")
@@ -357,6 +359,13 @@ def _plot_weekly_savings(pdf: PdfPages, df_weekly: pd.DataFrame) -> None:
         ax.tick_params(axis="x", rotation=35)
         plt.tight_layout()
         pdf.savefig(fig, bbox_inches="tight")
+        plt.close(fig)
+    if "weekly_export_revenue" in df_weekly.columns:
+        fig, ax = plt.subplots(figsize=(11.69, 8.27))
+        ax.bar(weekly["week_start"], weekly["weekly_export_revenue"], color=_BRAND["ok"])
+        _style_axes(ax, "Weekly Export Revenue", xlabel="Week start", ylabel="CHF/week")
+        ax.set_xticks(tick_positions)
+        ax.tick_params(axis="x", rotation=35)
         plt.close(fig)
 
 
@@ -517,15 +526,25 @@ def _build_kpi_table(solution_summary: dict) -> pd.DataFrame:
 
 
 def _build_settings_table(settings_snapshot: dict, input_dict: dict) -> pd.DataFrame:
+    # Get params once so we can use it for both sections
+    params = input_dict.get('parameters', {})
+    use_constant_import_price = params.get('use_constant_import_price', False)
+    use_constant_export_price = params.get('use_constant_export_price', False)
+    val_import = params.get('energy_import_price', params.get('constant_import_price', 'n/a'))
+    val_export = params.get('energy_export_price', params.get('constant_export_price', 'n/a'))
+
     rows = [
         {"Section": "Run", "Parameter": "timestamp", "Value": settings_snapshot.get("timestamp")},
         {"Section": "Run", "Parameter": "timesteps_used", "Value": settings_snapshot.get("timesteps_used")},
         {"Section": "Run", "Parameter": "load_existing_input_dict", "Value": settings_snapshot.get("load_existing_input_dict")},
         {"Section": "Run", "Parameter": "max_timesteps", "Value": settings_snapshot.get("max_timesteps")},
+        {"Section": "Run", "Parameter": "use_constant_import_price", "Value": params.get("use_constant_import_price")},
+        {"Section": "Run", "Parameter": "use_constant_export_price", "Value": params.get("use_constant_export_price")},
     ]
-    params = input_dict.get("parameters", {})
+    
     for key in sorted(params.keys()):
         rows.append({"Section": "Model Parameter", "Parameter": key, "Value": params[key]})
+        
     return pd.DataFrame(rows)
 
 
@@ -757,6 +776,79 @@ def _add_kpi_cards_page(pdf: PdfPages, solution_summary: dict, run_dir: Path, se
     plt.close(fig)
 
 
+def _plot_price_trends(pdf: PdfPages, df_ts: pd.DataFrame) -> None:
+    required = {"timestamp", "import_price_with_grid", "export_price"}
+    if not required.issubset(df_ts.columns):
+        return
+
+    ts = df_ts[["timestamp", "import_price_with_grid", "export_price"]].copy()
+    ts["timestamp"] = pd.to_datetime(ts["timestamp"], errors="coerce")
+    ts = ts.dropna(subset=["timestamp"]).sort_values("timestamp")
+    if ts.empty:
+        return
+
+    ts["week_start"] = ts["timestamp"].dt.to_period("W").apply(lambda p: p.start_time)
+
+    # Calculate weekly average prices
+    weekly_avg_prices = ts.groupby("week_start").agg(
+        avg_import=("import_price_with_grid", "mean"),
+        avg_export=("export_price", "mean")
+    ).dropna()
+
+    if weekly_avg_prices.empty:
+        return
+
+    # Select weeks for import prices
+    sorted_import_weeks = weekly_avg_prices.sort_values("avg_import").index.tolist()
+    # Ensure we have at least 3 weeks for selection, otherwise duplicate if needed
+    if len(sorted_import_weeks) < 3:
+        import_weeks_to_plot = sorted_import_weeks * (3 // len(sorted_import_weeks)) + sorted_import_weeks[:3 % len(sorted_import_weeks)]
+    else:
+        cheapest_import_week = sorted_import_weeks[0]
+        most_expensive_import_week = sorted_import_weeks[-1]
+        avg_import_week = sorted_import_weeks[len(sorted_import_weeks) // 2] # Median week
+        import_weeks_to_plot = [most_expensive_import_week, avg_import_week, cheapest_import_week]
+
+    # Select weeks for export prices
+    sorted_export_weeks = weekly_avg_prices.sort_values("avg_export").index.tolist()
+    if len(sorted_export_weeks) < 3:
+        export_weeks_to_plot = sorted_export_weeks * (3 // len(sorted_export_weeks)) + sorted_export_weeks[:3 % len(sorted_export_weeks)]
+    else:
+        cheapest_export_week = sorted_export_weeks[0]
+        most_expensive_export_week = sorted_export_weeks[-1]
+        avg_export_week = sorted_export_weeks[len(sorted_export_weeks) // 2] # Median week
+        export_weeks_to_plot = [most_expensive_export_week, avg_export_week, cheapest_export_week]
+
+    fig, axes = plt.subplots(3, 2, figsize=(11.69, 16.53), sharex=False) # A3 portrait for 6 plots
+    fig.suptitle("Electricity Price Trends by Week", fontsize=16, fontweight="bold", color=_BRAND["secondary"], y=0.98)
+
+    plot_configs = [
+        (import_weeks_to_plot[0], "Import Price (Most Expensive Week)", "import_price_with_grid", axes[0, 0]),
+        (import_weeks_to_plot[1], "Import Price (Average Week)", "import_price_with_grid", axes[1, 0]),
+        (import_weeks_to_plot[2], "Import Price (Cheapest Week)", "import_price_with_grid", axes[2, 0]),
+        (export_weeks_to_plot[0], "Export Price (Most Expensive Week)", "export_price", axes[0, 1]),
+        (export_weeks_to_plot[1], "Export Price (Average Week)", "export_price", axes[1, 1]),
+        (export_weeks_to_plot[2], "Export Price (Cheapest Week)", "export_price", axes[2, 1]),
+    ]
+
+    for week_start, title, price_col, ax in plot_configs:
+        week_end = week_start + pd.Timedelta(days=7)
+        week_df = ts[(ts["timestamp"] >= week_start) & (ts["timestamp"] < week_end)].copy()
+        
+        if not week_df.empty:
+            ax.plot(week_df["timestamp"], week_df[price_col], color=_BRAND["primary"], linewidth=1.2)
+            _style_axes(ax, title, xlabel=f"Week of {week_start.strftime('%Y-%m-%d')}", ylabel="Price [CHF/kWh]")
+            
+            # Formatting dates for each subplot specifically
+            ax.xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter('%a %H:%M'))
+            # Rotate labels for THIS specific axis
+            plt.setp(ax.get_xticklabels(), rotation=45, ha='right', fontsize=8)
+
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95]) # Space for the suptitle
+    pdf.savefig(fig, bbox_inches="tight")
+    plt.close(fig)
+
+
 def generate_pdf_report(run_dir: Path, solution_summary: dict, settings_snapshot: dict, input_dict: dict) -> Path:
     run_dir = Path(run_dir)
     report_path = run_dir / "results_report.pdf"
@@ -840,6 +932,7 @@ def generate_pdf_report(run_dir: Path, solution_summary: dict, settings_snapshot
         _plot_representative_peak_days(pdf, df_ts)
         _plot_representative_dispatch_weeks(pdf, df_ts)
         _plot_dispatch_and_soc(pdf, df_ts)
+        _plot_price_trends(pdf, df_ts)
         _add_table_page(pdf, "Peak Metrics", _to_report_table(df_peak_metrics, ["Metric", "Before battery", "After battery", "Reduction", "Reduction %", "Unit"]), max_rows=12)
         _add_table_page(
             pdf,
@@ -872,6 +965,18 @@ def generate_pdf_report(run_dir: Path, solution_summary: dict, settings_snapshot
             ),
             max_rows=14,
         )
+        _add_table_page(
+            pdf,
+            "Weekly Summary (Detailed)",
+            _to_report_table(
+                df_weekly,
+                keep_columns=["week_start", "weekly_import_cost_before", "weekly_import_cost_after", "weekly_savings", "weekly_export_revenue", "weekly_total_benefit", "weekly_peak_reduction"],
+                rename_map={
+                    "week_start": "Week Start", "weekly_import_cost_before": "Import Cost Before [CHF]", "weekly_import_cost_after": "Import Cost After [CHF]",
+                    "weekly_savings": "Import Savings [CHF]", "weekly_export_revenue": "Export Revenue [CHF]", "weekly_total_benefit": "Total Benefit [CHF]", "weekly_peak_reduction": "Peak Reduction [kW]"
+                },
+            ),
+        )
         _add_table_page(pdf, "Weekly Highlights", _build_weekly_highlights(df_weekly), max_rows=14)
 
         # 5) Financial section
@@ -903,7 +1008,7 @@ def generate_pdf_report(run_dir: Path, solution_summary: dict, settings_snapshot
             pdf,
             "Run Settings and Model Parameters",
             settings_table,
-            max_rows=16,
+            max_rows=20,
             subtitle="Configuration snapshot used for this optimization run",
         )
         assumptions_lines = [
@@ -911,6 +1016,10 @@ def generate_pdf_report(run_dir: Path, solution_summary: dict, settings_snapshot
             f"- Surplus handling: {input_dict.get('parameters', {}).get('surplus_handling', 'n/a')}",
             f"- Peak tariff granularity: {input_dict.get('parameters', {}).get('peak_shaving_frequency', 'n/a')}",
             f"- Peak tariff factor: {_fmt_num(input_dict.get('parameters', {}).get('peak_shaving_cost_factor', 'n/a'))}",
+            f"- Import price type: {'Constant' if use_constant_import_price else 'Dynamic (ENTSO-E)'}",
+            f"- Import price value: {_fmt_num(val_import) if use_constant_import_price else 'Variably calculated'} [CHF/kWh]",
+            f"- Export price type: {'Constant' if use_constant_export_price else 'Dynamic (ENTSO-E)'}",
+            f"- Export price value: {_fmt_num(val_export) if use_constant_export_price else 'Variably calculated'} [CHF/kWh]",
             f"- Energy CAPEX [CHF/kWh]: {_fmt_num(input_dict.get('parameters', {}).get('Battery_energy_invest_cost', 'n/a'))}",
             f"- Power CAPEX [CHF/kW]: {_fmt_num(input_dict.get('parameters', {}).get('Battery_power_invest_cost', 'n/a'))}",
             f"- Interest rate [-]: {_fmt_num(input_dict.get('parameters', {}).get('interest_rate', 'n/a'), digits=4)}",
