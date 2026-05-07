@@ -398,6 +398,7 @@ battery_charge_power = [v.solution_value() for v in solution_handles["battery_in
 battery_discharge_power = [v.solution_value() for v in solution_handles["battery_out_flow_vars"]]
 pv_flow = [v.solution_value() for v in solution_handles["pv_out_flow_vars"]]
 grid_flow = [v.solution_value() for v in solution_handles["grid_flow_vars"]]
+grid_export = [v.solution_value() for v in solution_handles["grid_export_vars"]]
 total_load = input_dict.get("total_demand", [])
 timestamps = input_dict.get("timestamps")
 rp.export_results(
@@ -407,6 +408,11 @@ rp.export_results(
     timestamps=timestamps,
     input_dict=input_dict,
     pv_flow=pv_flow,
+    grid_flow=grid_flow,
+    grid_export=grid_export,
+    total_load=total_load,
+    battery_charge_power=battery_charge_power,
+    battery_discharge_power=battery_discharge_power,
 )
 
 run_battery_size_sensitivity_flag = getattr(config, "run_battery_size_sensitivity", False)
