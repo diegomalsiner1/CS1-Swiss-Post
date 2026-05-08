@@ -2,7 +2,7 @@
 
 interest_rate = 0.06
 lifetime = 30
-load_existing_input_dict = True
+load_existing_input_dict = False
 max_timesteps = None
 optimization_mode = "lp"
 PV_max_capacity = 10000
@@ -31,5 +31,5 @@ use_constant_import_price = True
 use_constant_export_price = False
 energy_import_price = 0.09
 energy_export_price = 0.09
-Spot_price_year = 2024
+Spot_price_year = 2025
 exchange_rate = 0.94

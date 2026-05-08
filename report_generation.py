@@ -366,6 +366,8 @@ def _plot_weekly_savings(pdf: PdfPages, df_weekly: pd.DataFrame) -> None:
         _style_axes(ax, "Weekly Export Revenue", xlabel="Week start", ylabel="CHF/week")
         ax.set_xticks(tick_positions)
         ax.tick_params(axis="x", rotation=35)
+        plt.tight_layout()
+        pdf.savefig(fig, bbox_inches="tight")
         plt.close(fig)
 
 
@@ -797,51 +799,69 @@ def _plot_price_trends(pdf: PdfPages, df_ts: pd.DataFrame) -> None:
     if weekly_avg_prices.empty:
         return
 
-    # Select weeks for import prices
-    sorted_import_weeks = weekly_avg_prices.sort_values("avg_import").index.tolist()
-    # Ensure we have at least 3 weeks for selection, otherwise duplicate if needed
-    if len(sorted_import_weeks) < 3:
-        import_weeks_to_plot = sorted_import_weeks * (3 // len(sorted_import_weeks)) + sorted_import_weeks[:3 % len(sorted_import_weeks)]
-    else:
-        cheapest_import_week = sorted_import_weeks[0]
-        most_expensive_import_week = sorted_import_weeks[-1]
-        avg_import_week = sorted_import_weeks[len(sorted_import_weeks) // 2] # Median week
-        import_weeks_to_plot = [most_expensive_import_week, avg_import_week, cheapest_import_week]
+    plot_data = {}
+    # Process Import Prices
+    if "avg_import" in weekly_avg_prices.columns and not weekly_avg_prices["avg_import"].empty:
+        sorted_import = weekly_avg_prices["avg_import"].sort_values()
+        weeks = sorted_import.index.tolist()
+        if len(weeks) == 1:
+            plot_data["import_most_expensive"] = (weeks[0], "Import Price (Single Week)")
+            plot_data["import_average"] = (weeks[0], "Import Price (Single Week)")
+            plot_data["import_cheapest"] = (weeks[0], "Import Price (Single Week)")
+        elif len(weeks) == 2:
+            plot_data["import_most_expensive"] = (weeks[1], "Import Price (Higher-Priced Week)")
+            plot_data["import_average"] = (weeks[0], "Import Price (Lower-Priced Week)")
+            plot_data["import_cheapest"] = (weeks[0], "Import Price (Lower-Priced Week)")
+        else:
+            plot_data["import_most_expensive"] = (weeks[-1], "Import Price (Most Expensive Week)")
+            plot_data["import_average"] = (weeks[len(weeks) // 2], "Import Price (Average Week)")
+            plot_data["import_cheapest"] = (weeks[0], "Import Price (Cheapest Week)")
 
-    # Select weeks for export prices
-    sorted_export_weeks = weekly_avg_prices.sort_values("avg_export").index.tolist()
-    if len(sorted_export_weeks) < 3:
-        export_weeks_to_plot = sorted_export_weeks * (3 // len(sorted_export_weeks)) + sorted_export_weeks[:3 % len(sorted_export_weeks)]
-    else:
-        cheapest_export_week = sorted_export_weeks[0]
-        most_expensive_export_week = sorted_export_weeks[-1]
-        avg_export_week = sorted_export_weeks[len(sorted_export_weeks) // 2] # Median week
-        export_weeks_to_plot = [most_expensive_export_week, avg_export_week, cheapest_export_week]
+    # Process Export Prices
+    if "avg_export" in weekly_avg_prices.columns and not weekly_avg_prices["avg_export"].empty:
+        sorted_export = weekly_avg_prices["avg_export"].sort_values()
+        weeks = sorted_export.index.tolist()
+        if len(weeks) == 1:
+            plot_data["export_most_expensive"] = (weeks[0], "Export Price (Single Week)")
+            plot_data["export_average"] = (weeks[0], "Export Price (Single Week)")
+            plot_data["export_cheapest"] = (weeks[0], "Export Price (Single Week)")
+        elif len(weeks) == 2:
+            plot_data["export_most_expensive"] = (weeks[1], "Export Price (Higher-Priced Week)")
+            plot_data["export_average"] = (weeks[0], "Export Price (Lower-Priced Week)")
+            plot_data["export_cheapest"] = (weeks[0], "Export Price (Lower-Priced Week)")
+        else:
+            plot_data["export_most_expensive"] = (weeks[-1], "Export Price (Most Expensive Week)")
+            plot_data["export_average"] = (weeks[len(weeks) // 2], "Export Price (Average Week)")
+            plot_data["export_cheapest"] = (weeks[0], "Export Price (Cheapest Week)")
 
     fig, axes = plt.subplots(3, 2, figsize=(11.69, 16.53), sharex=False) # A3 portrait for 6 plots
     fig.suptitle("Electricity Price Trends by Week", fontsize=16, fontweight="bold", color=_BRAND["secondary"], y=0.98)
 
     plot_configs = [
-        (import_weeks_to_plot[0], "Import Price (Most Expensive Week)", "import_price_with_grid", axes[0, 0]),
-        (import_weeks_to_plot[1], "Import Price (Average Week)", "import_price_with_grid", axes[1, 0]),
-        (import_weeks_to_plot[2], "Import Price (Cheapest Week)", "import_price_with_grid", axes[2, 0]),
-        (export_weeks_to_plot[0], "Export Price (Most Expensive Week)", "export_price", axes[0, 1]),
-        (export_weeks_to_plot[1], "Export Price (Average Week)", "export_price", axes[1, 1]),
-        (export_weeks_to_plot[2], "Export Price (Cheapest Week)", "export_price", axes[2, 1]),
+        (plot_data.get("import_most_expensive"), "import_price_with_grid", axes[0, 0]),
+        (plot_data.get("import_average"), "import_price_with_grid", axes[1, 0]),
+        (plot_data.get("import_cheapest"), "import_price_with_grid", axes[2, 0]),
+        (plot_data.get("export_most_expensive"), "export_price", axes[0, 1]),
+        (plot_data.get("export_average"), "export_price", axes[1, 1]),
+        (plot_data.get("export_cheapest"), "export_price", axes[2, 1]),
     ]
 
-    for week_start, title, price_col, ax in plot_configs:
+    for config_tuple, price_col, ax in plot_configs:
+        if not config_tuple:
+            ax.axis("off")
+            continue
+
+        week_start, title = config_tuple
         week_end = week_start + pd.Timedelta(days=7)
         week_df = ts[(ts["timestamp"] >= week_start) & (ts["timestamp"] < week_end)].copy()
         
         if not week_df.empty:
             ax.plot(week_df["timestamp"], week_df[price_col], color=_BRAND["primary"], linewidth=1.2)
             _style_axes(ax, title, xlabel=f"Week of {week_start.strftime('%Y-%m-%d')}", ylabel="Price [CHF/kWh]")
-            
-            # Formatting dates for each subplot specifically
             ax.xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter('%a %H:%M'))
-            # Rotate labels for THIS specific axis
             plt.setp(ax.get_xticklabels(), rotation=45, ha='right', fontsize=8)
+        else:
+            ax.axis("off")
 
     plt.tight_layout(rect=[0, 0.03, 1, 0.95]) # Space for the suptitle
     pdf.savefig(fig, bbox_inches="tight")
