@@ -360,12 +360,12 @@ def build_default_sensitivity_sizes(input_dict: dict, optimized_capacity_kwh: fl
     else:
         sizes = [
             0.0,
-            min(cap_max, optimized_capacity_kwh * 0.5),
+            #min(cap_max, optimized_capacity_kwh * 0.5),
             min(cap_max, optimized_capacity_kwh * 0.75),
             min(cap_max, optimized_capacity_kwh),
             min(cap_max, optimized_capacity_kwh * 1.25),
-            min(cap_max, optimized_capacity_kwh * 1.5),
-            min(cap_max, optimized_capacity_kwh * 2.0),
+            #min(cap_max, optimized_capacity_kwh * 1.5),
+            #min(cap_max, optimized_capacity_kwh * 2.0),
         ]
         # Add one low absolute size point for better curve visibility.
         sizes.append(min(cap_max, max(100.0, optimized_capacity_kwh * 0.25)))
