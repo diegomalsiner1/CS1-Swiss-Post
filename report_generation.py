@@ -1038,10 +1038,12 @@ def generate_pdf_report(run_dir: Path, solution_summary: dict, settings_snapshot
             f"- Import price value: {_fmt_num(config.energy_import_price) if config.use_constant_import_price else 'Variably calculated'} [CHF/kWh]",
             f"- Export price type: {'Constant' if config.use_constant_export_price else 'Dynamic (ENTSO-E)'}",
             f"- Export price value: {_fmt_num(config.energy_export_price) if config.use_constant_export_price else 'Variably calculated'} [CHF/kWh]",
+            f"- Spot Price Year: {config.Spot_price_year if hasattr(config, 'Spot_price_year') else 'n/a'}",
             f"- Energy CAPEX [CHF/kWh]: {_fmt_num(input_dict.get('parameters', {}).get('Battery_energy_invest_cost', 'n/a'))}",
             f"- Power CAPEX [CHF/kW]: {_fmt_num(input_dict.get('parameters', {}).get('Battery_power_invest_cost', 'n/a'))}",
             f"- Interest rate [-]: {_fmt_num(input_dict.get('parameters', {}).get('interest_rate', 'n/a'), digits=4)}",
             f"- Lifetime [years]: {_fmt_num(input_dict.get('parameters', {}).get('lifetime', 'n/a'), digits=0)}",
+            
             "",
             "Notes",
             "- TAC denotes total annualized cost and is the optimization objective.",

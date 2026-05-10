@@ -672,6 +672,10 @@ def load_price_curve(year: int) -> pd.DataFrame:
     final_index = pd.date_range(start=start_date, end=end_date, freq="15min")
     df_prices = pd.DataFrame(index=final_index)
 
+    if needs_import_dyn or needs_export_dyn:
+        # Ensure df_dynamic_resampled is aligned to the full year index
+        df_dynamic_resampled = df_dynamic_resampled.set_index("timestamp").reindex(final_index).ffill().bfill().reset_index()
+
     if not needs_import_dyn:
         df_prices["import_price"] = getattr(config, "energy_import_price", 0.0)
     else:
