@@ -28,3 +28,4 @@ operation_and_maintenance = 100
 run_battery_size_sensitivity = False
 battery_sensitivity_sizes_kwh = None
 generate_pdf_report = True
+grid_fees = 0.05
