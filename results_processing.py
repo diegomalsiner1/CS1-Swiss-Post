@@ -377,7 +377,7 @@ def build_peak_metrics_tables(timestamps, baseline_grid_import, optimized_grid_i
 
 
 
-def build_monthly_summary_table(timestamps, baseline_grid_import, optimized_grid_import, import_price_with_grid, raw_import_price, optimized_grid_export, export_price):
+def build_monthly_summary_table(timestamps, baseline_grid_import, optimized_grid_import, import_price_with_grid, raw_import_price, optimized_grid_export, export_price, summary_dict=None):
     df = pd.DataFrame({
         "timestamp": pd.to_datetime(list(timestamps)),
         "baseline_grid_import": np.asarray(baseline_grid_import, dtype=float),
@@ -416,11 +416,25 @@ def build_monthly_summary_table(timestamps, baseline_grid_import, optimized_grid
     summary_df["monthly_peak_reduction"] = summary_df["monthly_peak_before"] - summary_df["monthly_peak_after"]
     summary_df["monthly_total_benefit"] = summary_df["monthly_savings"] + summary_df["monthly_export_revenue"]
 
+    # Add differentiated savings if summary_dict is provided
+    if summary_dict is not None:
+        baseline_peak_cost = float(summary_dict.get("no_battery_peak_demand_cost", np.nan))
+        optimized_peak_cost = float(summary_dict.get("peak_demand_cost", np.nan))
+        monthly_peak_savings_value = np.nan
+        if np.isfinite(baseline_peak_cost) and np.isfinite(optimized_peak_cost):
+            monthly_peak_savings_value = (baseline_peak_cost - optimized_peak_cost) / 12.0
+
+        summary_df["energy_import_savings"] = summary_df["monthly_savings"]
+        summary_df["peak_shaving_savings"] = monthly_peak_savings_value
+        summary_df["monthly_peak_cost_savings"] = monthly_peak_savings_value
+        summary_df["annual_baseline_peak_cost"] = baseline_peak_cost
+        summary_df["annual_optimized_peak_cost"] = optimized_peak_cost
+
     return summary_df
 
 
 
-def build_weekly_summary_table(timestamps, baseline_grid_import, optimized_grid_import, import_price_with_grid, raw_import_price, optimized_grid_export, export_price):
+def build_weekly_summary_table(timestamps, baseline_grid_import, optimized_grid_import, import_price_with_grid, raw_import_price, optimized_grid_export, export_price, summary_dict=None):
     weekly_df = pd.DataFrame({
         "timestamp": pd.to_datetime(list(timestamps)),
         "baseline_grid_import": np.asarray(baseline_grid_import, dtype=float),
@@ -467,7 +481,17 @@ def build_weekly_summary_table(timestamps, baseline_grid_import, optimized_grid_
         summary_df["weekly_peak_before"] - summary_df["weekly_peak_after"]
     )
     summary_df["weekly_total_benefit"] = summary_df["weekly_cost_savings"] + summary_df["weekly_export_revenue"]
-    
+
+    if summary_dict is not None:
+        baseline_peak_cost = float(summary_dict.get("no_battery_peak_demand_cost", np.nan))
+        optimized_peak_cost = float(summary_dict.get("peak_demand_cost", np.nan))
+        weekly_peak_savings_value = np.nan
+        if np.isfinite(baseline_peak_cost) and np.isfinite(optimized_peak_cost):
+            weekly_peak_savings_value = (baseline_peak_cost - optimized_peak_cost) / 52.0
+
+        summary_df["weekly_peak_cost_savings"] = weekly_peak_savings_value
+        summary_df["annual_baseline_peak_cost"] = baseline_peak_cost
+        summary_df["annual_optimized_peak_cost"] = optimized_peak_cost
 
     return summary_df[
         [
@@ -648,9 +672,9 @@ def export_results(
                 optimized_grid_import=ts_df["grid_flow"],
                 import_price_with_grid=input_dict["import_price_with_grid"][:min_len],
                 raw_import_price=input_dict.get("import_price", input_dict.get("raw_import_price"))[:min_len],
-                # ADD THESE TWO ARGUMENTS BELOW:
                 optimized_grid_export=ts_df["grid_export"] if "grid_export" in ts_df.columns else None,
                 export_price=input_dict["export_price"][:min_len] if "export_price" in input_dict else None,
+                summary_dict=solution_summary,  # Pass the summary dict for differentiated savings
             )
             weekly_summary_path = run_dir / "weekly_summary.csv"
             weekly_summary_df.to_csv(weekly_summary_path, index=False)

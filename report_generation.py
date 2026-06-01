@@ -317,20 +317,65 @@ def _plot_representative_dispatch_weeks(pdf: PdfPages, df_ts: pd.DataFrame) -> N
 def _plot_monthly_savings(pdf: PdfPages, df_monthly: pd.DataFrame) -> None:
     if df_monthly.empty or "month" not in df_monthly.columns:
         return
-    if "monthly_savings" in df_monthly.columns:
-        fig, ax = plt.subplots(figsize=(11.69, 8.27))
-        ax.bar(df_monthly["month"], df_monthly["monthly_savings"], color=_BRAND["secondary"])
-        _style_axes(ax, "Monthly Cost Savings", xlabel="Month", ylabel="CHF/month")
-        plt.tight_layout()
-        pdf.savefig(fig, bbox_inches="tight")
-        plt.close(fig)
-    if "monthly_peak_reduction" in df_monthly.columns:
-        fig, ax = plt.subplots(figsize=(11.69, 8.27))
-        ax.bar(df_monthly["month"], df_monthly["monthly_peak_reduction"], color=_BRAND["accent"])
-        _style_axes(ax, "Monthly Peak Reduction", xlabel="Month", ylabel="kW")
-        plt.tight_layout()
-        pdf.savefig(fig, bbox_inches="tight")
-        plt.close(fig)
+    required_cols = {"energy_import_savings", "peak_shaving_savings", "monthly_export_revenue"}
+    if not required_cols.issubset(df_monthly.columns):
+        # Fallback to simple savings plot if differentiated data not available
+        if "monthly_savings" in df_monthly.columns:
+            fig, ax = plt.subplots(figsize=(11.69, 8.27))
+            ax.bar(df_monthly["month"], df_monthly["monthly_savings"], color=_BRAND["secondary"])
+            _style_axes(ax, "Monthly Cost Savings", xlabel="Month", ylabel="CHF/month")
+            plt.tight_layout()
+            pdf.savefig(fig, bbox_inches="tight")
+            plt.close(fig)
+        return
+
+    fig, ax = plt.subplots(figsize=(11.69, 8.27))
+
+    # 1. Prepare Data
+    months = df_monthly["month"]
+    energy = df_monthly["energy_import_savings"]
+    peak = df_monthly["peak_shaving_savings"]
+    export = df_monthly["monthly_export_revenue"]
+    net_benefit = energy + peak + export
+
+    # 2. Plot Bars
+    # Initializing bottoms at zero
+    pos_bottom = np.zeros(len(df_monthly))
+    neg_bottom = np.zeros(len(df_monthly))
+
+    streams = [
+        (energy, _BRAND["primary"], "Energy Import Savings"),
+        (peak, _BRAND["accent"], "Even Monthly Peak Cost Savings"),
+        (export, _BRAND["ok"], "Export Revenue")
+    ]
+
+    for data, color, label in streams:
+        # Determine which values go up and which go down
+        pos_mask = data >= 0
+        neg_mask = data < 0
+        
+        # Plot positive segments
+        ax.bar(months[pos_mask], data[pos_mask], bottom=pos_bottom[pos_mask], color=color, label=label, alpha=0.8)
+        # Plot negative segments
+        ax.bar(months[neg_mask], data[neg_mask], bottom=neg_bottom[neg_mask], color=color, alpha=0.8)
+        
+        # Update bottoms
+        pos_bottom += np.where(pos_mask, data, 0)
+        neg_bottom += np.where(neg_mask, data, 0)
+
+    # 3. Plot Net Benefit Line
+    ax.hlines(y=net_benefit, xmin=np.arange(len(months)) - 0.4, 
+              xmax=np.arange(len(months)) + 0.4, 
+              color=_BRAND["secondary"], linewidth=2, label="Net Monthly Benefit", zorder=1)
+
+    # 4. Final Formatting
+    ax.axhline(0, color="black", linewidth=1.2, zorder=4)  # Thick zero line
+    _style_axes(ax, "Financial Value Stream Breakdown (Net Benefit in Red)", xlabel="Month", ylabel="Monthly Benefit [CHF]")
+    _apply_external_legend(ax, ncol=2, y_anchor=1.16, fontsize=8.5)
+    ax.tick_params(axis="x", rotation=45)
+    plt.tight_layout()
+    pdf.savefig(fig, bbox_inches="tight")
+    plt.close(fig)
 
 
 def _plot_weekly_savings(pdf: PdfPages, df_weekly: pd.DataFrame) -> None:
