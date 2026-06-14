@@ -420,10 +420,19 @@ def _plot_cashflows(pdf: PdfPages, df_fin: pd.DataFrame) -> None:
     if df_fin.empty or not {"year", "cashflow", "discounted_cashflow"}.issubset(df_fin.columns):
         return
     fig, ax1 = plt.subplots(figsize=(11.69, 8.27))
+    
+    # 1. Bar plot (Secondary Color)
     ax1.bar(df_fin["year"], df_fin["cashflow"], color=_BRAND["secondary"], alpha=0.75, label="Cashflow")
     _style_axes(ax1, "Financial Cashflows", xlabel="Year", ylabel="Cashflow [CHF]")
+    
+    # ---> CHANGE 1: Match ax1 elements to the secondary color
+    ax1.yaxis.label.set_color(_BRAND["secondary"])
+    ax1.tick_params(axis='y', colors=_BRAND["secondary"])
+    ax1.spines["left"].set_color(_BRAND["secondary"])
 
     ax2 = ax1.twinx()
+    
+    # 2. Line plot (Primary Color)
     ax2.plot(
         df_fin["year"],
         df_fin["discounted_cashflow"].cumsum(),
@@ -433,7 +442,13 @@ def _plot_cashflows(pdf: PdfPages, df_fin: pd.DataFrame) -> None:
     )
     ax2.set_ylabel("Cumulative discounted cashflow [CHF]")
     ax2.spines["top"].set_visible(False)
+    
+    # ---> CHANGE 2: Match ax2 elements to the primary color
+    ax2.yaxis.label.set_color(_BRAND["primary"])
+    ax2.tick_params(axis='y', colors=_BRAND["primary"])
+    ax2.spines["right"].set_color(_BRAND["primary"])
 
+    # Legend and saving logic stays the same...
     h1, l1 = ax1.get_legend_handles_labels()
     h2, l2 = ax2.get_legend_handles_labels()
     ax1.legend(

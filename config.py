@@ -1,9 +1,8 @@
 # Auto-generated from Excel - DO NOT EDIT MANUALLY
 
-use_case = "Peak_Shaving"
 interest_rate = 0.06
 lifetime = 30
-load_existing_input_dict = False
+load_existing_input_dict = True
 max_timesteps = None
 optimization_mode = "lp"
 PV_max_capacity = 10000
@@ -20,17 +19,17 @@ invest_cost_power = 200
 battery_degrading = 0.01
 battery_cycle_life = 6000
 battery_calendar_life_years = 15
-battery_replacement__cost_fraction = 1
+battery_replacement_cost_fraction = 0.8
 peak_shaving_frequency = "yearly"
-operation_and_maintenance = 100
-peak_shaving_cost_factor = 10
-run_battery_size_sensitivity = False
+operation_and_maintenance = 10000
+grid_fees = 0.09
+peak_shaving_cost_factor = 18
+run_battery_size_sensitivity = True
 battery_sensitivity_sizes_kwh = None
 generate_pdf_report = True
-grid_fees = 0.045
 use_constant_import_price = True
 use_constant_export_price = False
-energy_import_price = 0.045
+energy_import_price = 0.09
 energy_export_price = 0.09
-Spot_price_year = 2020
+Spot_price_year = 2019
 exchange_rate = 0.94

@@ -280,49 +280,129 @@ def _load_lkw_template_from_excel(file_path, sheet_name):
         workbook.close()
 
 
+# ==========================================================
+#  Control outliers in power data
+# ==========================================================
+
+def clean_power_outliers(df, column_name="value", threshold_quantile=0.999):
+    """
+    Finds values that are completely unrealistic relative to the 99.9th percentile
+    and caps them to that maximum value.
+    """
+    df = df.copy()
+    
+    # 1. Determine a strict upper threshold (e.g., top 0.1% of all values)
+    cutoff = df[column_name].quantile(threshold_quantile)
+    
+    # Let's say your 99.9th percentile is 400 kW. If a value hits 1202 kW,
+    # it's clearly a data glitch. We multiply the cutoff by an allowance factor (e.g., 2.0).
+    max_allowed = cutoff * 2.0
+    
+    # 2. Identify where the data explodes
+    outliers = df[column_name] > max_allowed
+    
+    if outliers.any():
+        num_outliers = outliers.sum()
+        print(f"⚠️ Found {num_outliers} outlier(s) in {column_name}. Clipping to {max_allowed:.2f} kW")
+        
+        # 3. Clip the values to your calculated maximum allowance
+        df.loc[outliers, column_name] = max_allowed
+        
+    return df
 
 # ==========================================================
 # 10 → 15 minute conversion
 # ==========================================================
+
+def _infer_nominal_interval_minutes(index):
+    # Accept a Series, Index or array-like of timestamps and ensure we
+    # operate on a DatetimeIndex so DatetimeIndex.to_series() is available.
+    dt_index = pd.DatetimeIndex(pd.to_datetime(index))
+
+    if dt_index.empty:
+        raise ValueError("Cannot infer nominal timestep interval from timestamps")
+
+    # compute differences between consecutive timestamps (in minutes)
+    diffs = dt_index.to_series().diff().dropna().dt.total_seconds().div(60)
+
+    if diffs.empty:
+        raise ValueError("Cannot infer nominal timestep interval from timestamps")
+
+    mode = diffs.mode()
+    interval_minutes = float(mode.iloc[0]) if not mode.empty else float(diffs.median())
+    if interval_minutes <= 0:
+        raise ValueError("Invalid inferred timestep interval")
+    return interval_minutes
+
+
 def convert_to_15min(df, column_name="power_kW"):
     """
-    Convert a 10-minute average power time series (kW)
-    into a 15-minute average power time series (kW).
-
-        1) Convert power → energy (kWh)
-        2) Move energy to a 5-minute grid
-        3) Aggregate energy to 15-minute blocks
-        4) Convert energy back → power
-
-    This guarantees energy conservation.
+    Safely converts regular interval power data (kW) to 15-minute
+    average power data (kW) using time-weighted resampling.
     """
-
     df = df.copy()
-    df = df.set_index("timestamp")
+    if "timestamp" in df.columns:
+        df = df.set_index("timestamp")
 
-    df["energy_kWh"] = df[column_name] * (10 / 60)
+    df.index = pd.to_datetime(df.index)
+    df = df.sort_index()
+    df = df[[column_name]].dropna()
+    df = df[~df.index.duplicated(keep="first")]
 
-    # Upsample to 5-minute grid
-    df_5 = df["energy_kWh"].resample("5min").asfreq()
-    df_5 = df_5.ffill() / 2
+    if df.empty:
+        return pd.DataFrame(columns=["timestamp", column_name])
 
-    # Aggregate to 15-minute
-    energy_15 = df_5.resample("15min").sum()
+    # Use the nominal interval from the input series so the last point can be
+    # extended to a full interval and the overlap-weighted 15-min average is
+    # computed correctly.
+    interval_minutes = _infer_nominal_interval_minutes(df.index)
+    interval = pd.Timedelta(minutes=interval_minutes)
 
-    power_15 = energy_15 / (15 / 60)
+    starts = df.index
+    ends = starts[1:].to_list() + [starts[-1] + interval]
+    values = df[column_name].to_numpy(dtype=float)
 
-    result = power_15.reset_index()
-    result.columns = ["timestamp", column_name]
+    target_start = starts[0].floor("15Min")
+    target_end = pd.to_datetime(ends[-1]).ceil("15Min")
+    target_index = pd.date_range(
+        start=target_start,
+        end=target_end - pd.Timedelta(minutes=15),
+        freq="15Min"
+    )
 
-    return result
+    weighted_sum = np.zeros(len(target_index), dtype=float)
+    total_seconds = np.zeros(len(target_index), dtype=float)
+
+    for interval_start, interval_end, value in zip(starts, ends, values):
+        bin_start = interval_start.floor("15Min")
+        while bin_start < interval_end:
+            bin_end = bin_start + pd.Timedelta(minutes=15)
+            overlap_start = max(interval_start, bin_start)
+            overlap_end = min(interval_end, bin_end)
+            overlap = (overlap_end - overlap_start).total_seconds()
+            if overlap > 0:
+                idx = int((bin_start - target_start) // pd.Timedelta(minutes=15))
+                weighted_sum[idx] += value * overlap
+                total_seconds[idx] += overlap
+            bin_start = bin_end
+
+    result = np.where(total_seconds > 0, weighted_sum / total_seconds, np.nan)
+    return pd.DataFrame({"timestamp": target_index, column_name: result})
 
 
 # ==========================================================
 # Generic trafo loader
 # ==========================================================
+
 def load_trafo(sheet_name):
     """
     Load and clean a transformer sheet.
+    Supports sheets with the following average units in the data column:
+        - avg[W]
+        - avg[kW]
+        - avg[Wh]
+        - avg[kWh]
+
     Returns:
         DataFrame with columns:
             timestamp (datetime)
@@ -336,44 +416,50 @@ def load_trafo(sheet_name):
         header=1
     )
 
-    # Detect avg column automatically
-    avg_columns = [col for col in df.columns if "-avg[W]" in col]
+    # Updated regex to include 'kW'
+    avg_columns = [
+        col for col in df.columns
+        if isinstance(col, str) and re.search(r"-avg\[(W|kW|Wh|kWh)\]$", col)
+    ]
     if not avg_columns:
         raise ValueError(f"No avg column found in sheet {sheet_name}")
+
     avg_column = avg_columns[0]
+    unit_match = re.search(r"-avg\[(?P<unit>W|kW|Wh|kWh)\]$", avg_column)
+    unit = unit_match.group("unit") if unit_match else "W"
 
     df = df[["Zeit", avg_column]]
-    df.columns = ["timestamp", "power_W"]
+    df.columns = ["timestamp", "value"]
 
-    # Convert types
-    df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
-    df["power_W"] = pd.to_numeric(df["power_W"], errors="coerce")
+    # Try to parse common European GUI format explicitly to avoid
+    # pandas' fallback-to-dateutil warning. Fall back to dayfirst parsing.
+    ts_sample = df["timestamp"].astype(str).dropna().head(20)
+    if not ts_sample.empty and ts_sample.str.match(r"\d{1,2}/\d{1,2}/\d{4} \d{2}:\d{2}:\d{2}").all():
+        df["timestamp"] = pd.to_datetime(df["timestamp"], format="%d/%m/%Y %H:%M:%S", errors="coerce")
+    else:
+        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce", dayfirst=True)
 
-    df = df.dropna()
-
-    # Convert W → kW
-    df["power_kW"] = df["power_W"] / 1000
-
-    df = df[["timestamp", "power_kW"]]
-
-    df = df.sort_values("timestamp")
+    df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    df = df.dropna(subset=["timestamp", "value"]).sort_values("timestamp")
+    df = clean_power_outliers(df, column_name="value")
     df = df.drop_duplicates(subset="timestamp", keep="first")
 
-    df = df.set_index("timestamp")
+    # Group 1: Direct Power Units
+    if unit == "W":
+        df["power_kW"] = df["value"] / 1000.0
+    elif unit == "kW":
+        df["power_kW"] = df["value"]
+        
+    # Group 2: Accumulated Energy Units (convert to power based on interval duration)
+    else:
+        df["energy_kWh"] = df["value"] / 1000.0 if unit == "Wh" else df["value"]
+        interval_minutes = _infer_nominal_interval_minutes(df["timestamp"])
+        df["power_kW"] = df["energy_kWh"] / (interval_minutes / 60.0)
 
-    full_index = pd.date_range(
-        start=df.index.min(),
-        end=df.index.max(),
-        freq="10min"
-    )
-
-    df = df.reindex(full_index)
-
-    df["power_kW"] = df["power_kW"].interpolate(method="time")
-
-    df = df.reset_index()
-    df.columns = ["timestamp", "power_kW"]
-    df_15 = convert_to_15min(df,"power_kW")
+    df = df[["timestamp", "power_kW"]]
+    
+    # Handled safely now using the time-weighted upsampling/downsampling method!
+    df_15 = convert_to_15min(df, "power_kW")
     return df_15
 
 
@@ -503,11 +589,12 @@ def generate_zustellung_profile(file_path=None, year=None, sheet_name=None):
         header=0
     )
 
-    # Remove empty Excel columns
-    df = df.loc[:, ~df.columns.str.contains("^Unnamed")]
-
-    # Rename first column to "time"
+    # Rename first column to "time" before removing other Unnamed columns
     df = df.rename(columns={df.columns[0]: "time"})
+
+    # Remove empty Excel columns and normalize column names
+    df = df.loc[:, ~df.columns.str.contains("^Unnamed")]
+    df.columns = df.columns.astype(str).str.strip()
 
     # Robust time parsing
     def parse_time(value):
