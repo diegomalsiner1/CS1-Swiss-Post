@@ -44,7 +44,6 @@ def get_runtime_parameters() -> dict:
             "battery_min_soc_fraction": getattr(config, "battery_min_soc_fraction", 0.0),
             "battery_cycle_life": getattr(config, "battery_cycle_life", None),
             "battery_calendar_life_years": getattr(config, "battery_calendar_life_years", None),
-            "surplus_handling": getattr(config, "surplus_handling", "curtail"),
             "battery_replacement_cost_fraction": getattr(config, "battery_replacement_cost_fraction", 0.0),
             # Parameters for sensitivity and report
             "run_battery_size_sensitivity": getattr(config, "run_battery_size_sensitivity", False),
@@ -86,7 +85,6 @@ def save_run_artifacts(run_dir: Path, input_dict: dict, solution_summary: dict, 
         "no_battery_import_cost": float(solution_summary.get("no_battery_import_cost", 0.0)),
         "no_battery_peak_demand_cost": float(solution_summary.get("no_battery_peak_demand_cost", 0.0)),
         "no_battery_total_cost": float(solution_summary.get("no_battery_total_cost", 0.0)),
-        "curtailed_energy_kwh": float(solution_summary.get("curtailed_energy_kwh", 0.0)),
         "replacement_cost": float(solution_summary.get("replacement_cost", 0.0)),
         "replacement_year": solution_summary.get("replacement_year"),
         "npv": float(solution_summary.get("npv", np.nan)),
@@ -182,16 +180,18 @@ def build_input_dict_from_raw_data() -> dict:
     # Dynamic price profile from ENTSO-E day-ahead spot prices (CHF/kWh)
     price_df = dpp.load_price_curve(year=year)
     merged_df = merged_df.merge(price_df, on="timestamp", how="left")
-    merged_df["electricity_price"] = merged_df["electricity_price"].ffill().bfill()
-    merged_df["electricity_selling_price"] = (merged_df["electricity_price"] - config.grid_fees).tolist()
+    merged_df["import_price"] = merged_df["import_price"].ffill().bfill()
+    merged_df["import_price_with_grid"] = (merged_df["import_price"] + config.grid_fees).tolist()
+    merged_df["export_price"] = merged_df["export_price"].ffill().bfill()
 
     return {
         "parameters": get_runtime_parameters(),
         "timestamps": merged_df["timestamp"].astype(str).tolist(),
         "total_demand": merged_df["total_demand"].tolist(),
         "PV_capacity_factor": merged_df["PV_capacity_factor"].tolist(),
-        "electricity_price": merged_df["electricity_price"].tolist(),
-        "electricity_selling_price": merged_df["electricity_selling_price"].tolist(),
+        "import_price": merged_df["import_price"].tolist(),
+        "import_price_with_grid":merged_df["import_price_with_grid"].tolist(),
+        "export_price": merged_df["export_price"].tolist(),
     }
 
 
@@ -206,8 +206,13 @@ def load_or_build_input_dict() -> dict:
             print(f"Loading input dictionary from {INPUT_DICT_PATH}")
             input_dict = json.load(f)
         input_dict["parameters"] = get_runtime_parameters()
-        if "electricity_price" in input_dict and "electricity_selling_price" not in input_dict:
-            input_dict["electricity_selling_price"] = [float(p) - config.grid_fees for p in input_dict["electricity_price"]]
+        
+        # Migration/Legacy fallback: map old keys to new keys if necessary
+        if "import_price" not in input_dict and "electricity_price" in input_dict:
+            input_dict["import_price"] = input_dict.pop("electricity_price")
+        if "export_price" not in input_dict:
+            selling_price = input_dict.pop("electricity_selling_price", None)
+            input_dict["export_price"] = selling_price if selling_price is not None else [p - config.grid_fees for p in input_dict["import_price"]]
 
         steps_before = len(input_dict.get("total_demand", []))
         input_dict = apply_timestep_cap(input_dict, config.max_timesteps)
@@ -255,7 +260,6 @@ def run_battery_size_sensitivity(input_dict: dict, battery_sizes_kwh) -> pd.Data
                 "fixed_om_cost": 0.0,
                 "annualized_battery_cost": 0.0,
                 "peak_demand_cost": float(baseline_summary.get("no_battery_peak_demand_cost", 0.0)),
-                "curtailed_energy_kwh": 0.0,
                 **baseline_summary,
             }
             rows.append(
@@ -367,7 +371,7 @@ def build_default_sensitivity_sizes(input_dict: dict, optimized_capacity_kwh: fl
         sizes.append(min(cap_max, max(100.0, optimized_capacity_kwh * 0.25)))
 
     # Unique, sorted, rounded for cleaner exports.
-    sizes = sorted({round(float(s), 3) for s in sizes if s >= 0})
+    sizes = sorted({float(s) for s in sizes if s >= 0})
     return sizes
 
 
@@ -393,8 +397,8 @@ battery_soc = [v.solution_value() for v in solution_handles["battery_level_vars"
 battery_charge_power = [v.solution_value() for v in solution_handles["battery_in_flow_vars"]]
 battery_discharge_power = [v.solution_value() for v in solution_handles["battery_out_flow_vars"]]
 pv_flow = [v.solution_value() for v in solution_handles["pv_out_flow_vars"]]
-spill_flow = [v.solution_value() for v in solution_handles["spill_flow_vars"]]
 grid_flow = [v.solution_value() for v in solution_handles["grid_flow_vars"]]
+grid_export = [v.solution_value() for v in solution_handles["grid_export_vars"]]
 total_load = input_dict.get("total_demand", [])
 timestamps = input_dict.get("timestamps")
 rp.export_results(
@@ -404,8 +408,8 @@ rp.export_results(
     timestamps=timestamps,
     input_dict=input_dict,
     pv_flow=pv_flow,
-    spill_flow=spill_flow,
     grid_flow=grid_flow,
+    grid_export=grid_export,
     total_load=total_load,
     battery_charge_power=battery_charge_power,
     battery_discharge_power=battery_discharge_power,
